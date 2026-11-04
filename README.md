@@ -6,8 +6,11 @@ across independent storage-node processes. PostgreSQL holds the authoritative
 metadata, Kafka carries domain events through a transactional outbox, and the
 system detects failures and repairs from verified replicas.
 
-> **Status: early.** Phase 0 (design) is done and Phase 1 (foundation) is
-> code-complete. Uploads, replication and repair are **not implemented yet**.
+> **Status:** Phases 0–2 are done and Phase 3 is partial. Chunked upload and
+> download work, with 3 checksum-verified replicas on distinct nodes,
+> read-path corruption detection and asynchronous delete. Kafka publishing,
+> automatic repair, the scrubber, authentication and the dashboard are **not
+> implemented yet**.
 > The exact state, with test evidence, is in
 > [docs/implementation-status.md](docs/implementation-status.md).
 
@@ -16,6 +19,7 @@ system detects failures and repairs from verified replicas.
 ```
 backend/         Spring Boot control plane (API, metadata, placement, outbox, repair)
 storage-node/    Independent storage-node process (one per container/volume)
+node-protocol/   Shared node-protocol constants, HMAC request signing, SHA-256 helpers
 frontend/        React + TypeScript operations console (Vite)
 infra/compose/   Docker Compose topology (Postgres, Kafka KRaft, backend, 3 nodes, monitoring profile)
 infra/monitoring Prometheus scrape config
@@ -38,6 +42,9 @@ scripts/gen-env.sh      # creates .env with random local secrets (never overwrit
 scripts/build.sh        # mvn package (unit tests) + frontend build
 scripts/up.sh           # starts the stack and waits for /api/v1/health
 scripts/status.sh       # container state + every health endpoint
+scripts/bv.sh nodes     # node inventory
+scripts/bv.sh upload ./some-file          # prints the object id
+scripts/bv.sh download <objectId> ./copy  # verifies size; compare with shasum -a 256
 cd frontend && npm run dev   # console at http://127.0.0.1:5173
 ```
 

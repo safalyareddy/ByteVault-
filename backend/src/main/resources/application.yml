@@ -11,6 +11,19 @@ spring:
     name: bytevault-backend
   lifecycle:
     timeout-per-shutdown-phase: 20s
+  mvc:
+    # PUT bodies are raw chunk bytes; never let the form filter consume them.
+    formcontent:
+      filter:
+        enabled: false
+    async:
+      request-timeout: 30m
+  task:
+    execution:
+      pool:
+        core-size: 8
+        max-size: 32
+        queue-capacity: 100
   threads:
     virtual:
       enabled: false
@@ -42,6 +55,12 @@ bytevault:
   suspect-after: ${BV_SUSPECT_AFTER:15s}
   offline-after: ${BV_OFFLINE_AFTER:45s}
   scrub-interval: ${BV_SCRUB_INTERVAL:10m}
+  cluster:
+    nodes: ${BV_NODES:}
+    node-secrets: ${BV_NODE_SECRETS:}
+    node-request-timeout: ${BV_NODE_REQUEST_TIMEOUT:30s}
+    max-concurrent-chunk-transfers: ${BV_MAX_CONCURRENT_CHUNK_TRANSFERS:8}
+    upload-session-ttl: ${BV_UPLOAD_SESSION_TTL:24h}
   kafka:
     topic-partitions: ${BV_KAFKA_TOPIC_PARTITIONS:3}
     topic-replication-factor: ${BV_KAFKA_TOPIC_REPLICATION:1}

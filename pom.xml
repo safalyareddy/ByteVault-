@@ -19,8 +19,9 @@
   <description>Self-healing distributed object storage</description>
 
   <modules>
-    <module>backend</module>
+    <module>node-protocol</module>
     <module>storage-node</module>
+    <module>backend</module>
   </modules>
 
   <properties>
@@ -28,6 +29,16 @@
     <maven.compiler.release>21</maven.compiler.release>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
   </properties>
+
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>dev.bytevault</groupId>
+        <artifactId>bytevault-node-protocol</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
 
   <build>
     <plugins>
