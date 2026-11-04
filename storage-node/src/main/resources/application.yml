@@ -1,0 +1,38 @@
+server:
+  port: ${SERVER_PORT:9100}
+  shutdown: graceful
+  tomcat:
+    threads:
+      max: ${BV_NODE_HTTP_MAX_THREADS:32}
+    connection-timeout: 20s
+
+spring:
+  application:
+    name: bytevault-storage-node
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
+
+bytevault:
+  node:
+    id: ${BV_NODE_ID}
+    data-dir: ${BV_NODE_DATA_DIR}
+    auth-secret: ${BV_NODE_AUTH_SECRET}
+    advertised-endpoint: ${BV_NODE_ADVERTISED_ENDPOINT:http://localhost:9100}
+    control-plane-url: ${BV_CONTROL_PLANE_URL:http://localhost:8090}
+    heartbeat-interval: ${BV_HEARTBEAT_INTERVAL:5s}
+    max-chunk-bytes: ${BV_NODE_MAX_CHUNK_BYTES:67108864}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: never
+      probes:
+        enabled: true
+  metrics:
+    tags:
+      application: bytevault-storage-node
+      node: ${BV_NODE_ID:unset}

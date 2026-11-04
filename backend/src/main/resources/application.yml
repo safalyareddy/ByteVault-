@@ -1,0 +1,70 @@
+server:
+  port: ${SERVER_PORT:8090}
+  shutdown: graceful
+  tomcat:
+    threads:
+      max: ${BV_HTTP_MAX_THREADS:64}
+    connection-timeout: 20s
+
+spring:
+  application:
+    name: bytevault-backend
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
+  threads:
+    virtual:
+      enabled: false
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:55432/bytevault}
+    username: ${DATABASE_USERNAME:bytevault}
+    password: ${DATABASE_PASSWORD}
+    hikari:
+      maximum-pool-size: ${BV_DB_POOL_SIZE:10}
+      connection-timeout: 5000
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    admin:
+      fail-fast: false
+      operation-timeout: 10s
+    producer:
+      acks: all
+      properties:
+        enable.idempotence: true
+
+bytevault:
+  chunk-size-bytes: ${BV_CHUNK_SIZE_BYTES:4194304}
+  replication-factor: ${BV_REPLICATION_FACTOR:3}
+  max-upload-bytes: ${BV_MAX_UPLOAD_BYTES:1073741824}
+  heartbeat-interval: ${BV_HEARTBEAT_INTERVAL:5s}
+  suspect-after: ${BV_SUSPECT_AFTER:15s}
+  offline-after: ${BV_OFFLINE_AFTER:45s}
+  scrub-interval: ${BV_SCRUB_INTERVAL:10m}
+  kafka:
+    topic-partitions: ${BV_KAFKA_TOPIC_PARTITIONS:3}
+    topic-replication-factor: ${BV_KAFKA_TOPIC_REPLICATION:1}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: never
+      probes:
+        enabled: true
+      group:
+        readiness:
+          include: readinessState,db,kafka
+        liveness:
+          include: livenessState
+  metrics:
+    tags:
+      application: bytevault-backend
+
+logging:
+  pattern:
+    level: "%5p [cid=%X{correlationId:-}]"

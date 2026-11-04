@@ -1,0 +1,22 @@
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+
+# Build output
+target/
+frontend/dist/
+frontend/node_modules/
+*.log
+
+# Local data, never committed
+data/
+benchmarks/raw/
+*.chunk
+*.part
+
+# IDE / OS
+.idea/
+.vscode/
+*.iml
+.DS_Store

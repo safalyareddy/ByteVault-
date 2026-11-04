@@ -1,0 +1,11 @@
+global:
+  scrape_interval: 15s
+scrape_configs:
+  - job_name: bytevault-backend
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["backend:8090"]
+  - job_name: bytevault-nodes
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["node-1:9100", "node-2:9100", "node-3:9100"]
