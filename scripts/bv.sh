@@ -3,9 +3,22 @@
 #   scripts/bv.sh upload <file>             upload in chunks, complete, print object id
 #   scripts/bv.sh download <objectId> <out> download and verify against the server's chunk checksums
 #   scripts/bv.sh show <objectId>           object, chunk and replica metadata
-#   scripts/bv.sh nodes                     node inventory
+#   scripts/bv.sh nodes                     node inventory (ADMIN)
+#   scripts/bv.sh login [username]          log in; token saved to .bv-token (mode 600)
+#   scripts/bv.sh logout                    revoke the saved token
 set -euo pipefail
 API="${BV_API:-http://127.0.0.1:8090/api/v1}"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TOKEN_FILE="$ROOT/.bv-token"
+
+# curl wrapper that adds the bearer token when one is saved.
+api() {
+  if [[ -f "$TOKEN_FILE" ]]; then
+    curl -H "Authorization: Bearer $(cat "$TOKEN_FILE")" "$@"
+  else
+    curl "$@"
+  fi
+}
 
 sha256() { shasum -a 256 "$1" | cut -d' ' -f1; }
 die() { echo "error: $*" >&2; exit 1; }
@@ -19,7 +32,7 @@ upload() {
   name=$(basename "$file")
   # Deterministic key: re-running the same upload resumes the same session.
   key="cli-$(printf '%s:%s:%s' "$name" "$size" "$(sha256 "$file")" | shasum -a 256 | cut -c1-40)"
-  session=$(curl -fsS -X POST "$API/uploads" -H "Idempotency-Key: $key" -H 'Content-Type: application/json' \
+  session=$(api -fsS -X POST "$API/uploads" -H "Idempotency-Key: $key" -H 'Content-Type: application/json' \
     -d "$(jq -n --arg n "$name" --argjson s "$size" '{name:$n,sizeBytes:$s,contentType:"application/octet-stream"}')")
   upload_id=$(jq -r .uploadId <<<"$session")
   chunk_size=$(jq -r .chunkSizeBytes <<<"$session")
@@ -35,29 +48,41 @@ upload() {
   for ((i = 0; i < chunk_count; i++)); do
     dd if="$file" of="$tmp" bs="$chunk_size" skip="$i" count=1 2>/dev/null
     local res code
-    res=$(curl -sS -w '\n%{http_code}' -X PUT "$API/uploads/$upload_id/chunks/$i" \
+    res=$(api -sS -w '\n%{http_code}' -X PUT "$API/uploads/$upload_id/chunks/$i" \
       -H 'Content-Type: application/octet-stream' -H "X-Chunk-SHA256: $(sha256 "$tmp")" --data-binary @"$tmp")
     code=$(tail -n1 <<<"$res")
     [[ "$code" == 200 ]] || die "chunk $i failed (HTTP $code): $(sed '$d' <<<"$res")"
     echo "  chunk $i stored on $(sed '$d' <<<"$res" | jq -r '[.replicas[] | select(.state=="VERIFIED") | .nodeId] | join(",")')" >&2
   done
-  curl -fsS -X POST "$API/uploads/$upload_id/complete" | jq -r .objectId
+  api -fsS -X POST "$API/uploads/$upload_id/complete" | jq -r .objectId
 }
 
 download() {
   local id="$1" out="$2"
-  curl -fsS -o "$out" "$API/objects/$id/download" || die "download failed"
+  api -fsS -o "$out" "$API/objects/$id/download" || die "download failed"
   local expected actual
-  expected=$(curl -fsS "$API/objects/$id" | jq -r .object.sizeBytes)
+  expected=$(api -fsS "$API/objects/$id" | jq -r .object.sizeBytes)
   actual=$(stat -f %z "$out" 2>/dev/null || stat -c %s "$out")
   [[ "$expected" == "$actual" ]] || die "truncated download: $actual of $expected bytes"
   echo "$out: $actual bytes, sha256 $(sha256 "$out")"
 }
 
+login() {
+  local user="${1:-admin}" pass
+  read -r -s -p "Password for $user: " pass; echo >&2
+  local res
+  res=$(curl -fsS -X POST "$API/auth/login" -H 'Content-Type: application/json' \
+    -d "$(jq -n --arg u "$user" --arg p "$pass" '{username:$u,password:$p}')") || die "login failed"
+  (umask 077; jq -r .token <<<"$res" > "$TOKEN_FILE")
+  echo "logged in as $(jq -r '.username + " (" + .role + ")"' <<<"$res"), token expires $(jq -r .expiresAt <<<"$res")" >&2
+}
+
 case "${1:-}" in
+  login) login "${2:-}" ;;
+  logout) api -fsS -X POST "$API/auth/logout" >/dev/null; rm -f "$TOKEN_FILE"; echo "logged out" >&2 ;;
   upload) upload "${2:?file}" ;;
   download) download "${2:?objectId}" "${3:?output file}" ;;
-  show) curl -fsS "$API/objects/${2:?objectId}" | jq . ;;
-  nodes) curl -fsS "$API/nodes" | jq . ;;
-  *) sed -n '2,7p' "$0"; exit 1 ;;
+  show) api -fsS "$API/objects/${2:?objectId}" | jq . ;;
+  nodes) api -fsS "$API/nodes" | jq . ;;
+  *) sed -n '2,10p' "$0"; exit 1 ;;
 esac

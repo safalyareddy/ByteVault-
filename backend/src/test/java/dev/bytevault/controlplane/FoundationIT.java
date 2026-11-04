@@ -24,14 +24,18 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * schema-level invariants that later phases depend on.
  */
 @Testcontainers(disabledWithoutDocker = true)
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-        properties = "spring.datasource.password=test")
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @Import(ContainersConfig.class)
 class FoundationIT {
 
     @Autowired TestRestTemplate http;
     @Autowired JdbcTemplate jdbc;
     @Autowired KafkaAdmin kafkaAdmin;
+
+    @org.junit.jupiter.api.BeforeEach
+    void login() {
+        TestAuth.asAdmin(http);
+    }
 
     @Test
     void healthEndpointReportsDatabaseAndKafkaUp() {

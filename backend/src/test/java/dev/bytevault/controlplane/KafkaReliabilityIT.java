@@ -53,13 +53,11 @@ import org.testcontainers.kafka.KafkaContainer;
 @Testcontainers(disabledWithoutDocker = true)
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
         "spring.datasource.password=test",
-        "bytevault.admin-token=" + KafkaReliabilityIT.ADMIN_TOKEN,
         "bytevault.outbox.poll-interval=200ms"})
 @Import({ContainersConfig.class, KafkaReliabilityIT.HookConfig.class})
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class KafkaReliabilityIT {
 
-    static final String ADMIN_TOKEN = "admin-token-for-tests-0123456789abcdef";
 
     /** Injects failures into the object-stats consumer for one chosen event at a time. */
     static class FaultHook implements EventProcessingHook {
@@ -116,6 +114,7 @@ class KafkaReliabilityIT {
     @BeforeEach
     void resetHook() {
         hook.reset();
+        TestAuth.asAdmin(http);
     }
 
     // ------------------------------------------------------------------ helpers
@@ -179,12 +178,10 @@ class KafkaReliabilityIT {
                 json.valueToTree(Map.of("objectId", e.objectId(), "totalSize", e.size()))));
     }
 
+    /** {@code token == null}: use the logged-in admin; otherwise send that (invalid) bearer token. */
     HttpHeaders admin(String token) {
-        HttpHeaders h = new HttpHeaders();
+        HttpHeaders h = token == null ? new HttpHeaders() : TestAuth.bearer(token);
         h.setContentType(MediaType.APPLICATION_JSON);
-        if (token != null) {
-            h.set("X-BV-Admin-Token", token);
-        }
         return h;
     }
 
@@ -303,16 +300,16 @@ class KafkaReliabilityIT {
 
         String dlqId = dlq.get("id").toString();
         String path = "/api/v1/admin/dlq/" + dlqId + "/replay";
-        HttpEntity<Map<String, String>> noToken = new HttpEntity<>(Map.of("reason", "x"), admin(null));
+        HttpEntity<Map<String, String>> noToken = new HttpEntity<>(Map.of("reason", "x"), admin("not-a-real-token-0000000000"));
         assertThat(http.exchange(path, HttpMethod.POST, noToken, JsonNode.class).getStatusCode().value()).isEqualTo(401);
-        HttpEntity<Map<String, String>> badToken = new HttpEntity<>(Map.of("reason", "x"), admin("wrong-token"));
+        HttpEntity<Map<String, String>> badToken = new HttpEntity<>(Map.of("reason", "x"), admin("wrong-token-1111111111111111"));
         assertThat(http.exchange(path, HttpMethod.POST, badToken, JsonNode.class).getStatusCode().value()).isEqualTo(401);
-        HttpEntity<Map<String, String>> noReason = new HttpEntity<>(Map.of(), admin(ADMIN_TOKEN));
+        HttpEntity<Map<String, String>> noReason = new HttpEntity<>(Map.of(), admin(null));
         assertThat(http.exchange(path, HttpMethod.POST, noReason, JsonNode.class).getStatusCode().value()).isEqualTo(400);
 
         hook.failBeforeApply.set(0); // "the fix is deployed"
         HttpEntity<Map<String, String>> ok = new HttpEntity<>(Map.of("reason", "bug fixed in stats consumer"),
-                admin(ADMIN_TOKEN));
+                admin(null));
         var res = http.exchange(path, HttpMethod.POST, ok, JsonNode.class);
         assertThat(res.getStatusCode().value()).isEqualTo(200);
         assertThat(res.getBody().get("replayAttempt").asInt()).isEqualTo(1);
@@ -326,7 +323,7 @@ class KafkaReliabilityIT {
         Map<String, Object> audit = jdbc.queryForMap("SELECT actor, details->>'reason' AS reason, "
                 + "details->>'replayAttempt' AS attempt FROM audit_events WHERE action = 'DLQ_REPLAY' AND resource_id = ?",
                 dlqId);
-        assertThat(audit).containsEntry("actor", "admin-token").containsEntry("reason", "bug fixed in stats consumer")
+        assertThat(audit).containsEntry("actor", "admin").containsEntry("reason", "bug fixed in stats consumer")
                 .containsEntry("attempt", "1");
     }
 

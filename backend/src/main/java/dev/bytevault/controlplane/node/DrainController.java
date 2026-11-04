@@ -1,6 +1,5 @@
 package dev.bytevault.controlplane.node;
 
-import dev.bytevault.controlplane.admin.AdminGuard;
 import dev.bytevault.controlplane.events.Topics;
 import dev.bytevault.controlplane.outbox.OutboxWriter;
 import dev.bytevault.controlplane.web.ApiException;
@@ -15,7 +14,6 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -31,12 +29,12 @@ public class DrainController {
 
     private final NodeRepository nodes;
     private final NodeLifecycleService lifecycle;
-    private final AdminGuard guard;
+    private final dev.bytevault.controlplane.security.CurrentUser guard;
     private final OutboxWriter outbox;
     private final TransactionTemplate tx;
     private final JdbcClient jdbc;
 
-    public DrainController(NodeRepository nodes, NodeLifecycleService lifecycle, AdminGuard guard, OutboxWriter outbox,
+    public DrainController(NodeRepository nodes, NodeLifecycleService lifecycle, dev.bytevault.controlplane.security.CurrentUser guard, OutboxWriter outbox,
                            TransactionTemplate tx, JdbcClient jdbc) {
         this.nodes = nodes;
         this.lifecycle = lifecycle;
@@ -52,9 +50,8 @@ public class DrainController {
                               int chunksStillDependingOnNode, boolean safeToRemove) {}
 
     @PostMapping("/drain")
-    public DrainStatus drain(@RequestHeader(value = AdminGuard.HEADER, required = false) String token,
-                             @PathVariable String nodeId, @Valid @RequestBody DrainRequest request) {
-        String actor = guard.requireAdmin(token);
+    public DrainStatus drain(@PathVariable String nodeId, @Valid @RequestBody DrainRequest request) {
+        String actor = guard.requireAdmin();
         NodeRepository.NodeRow row = nodes.find(nodeId).orElseThrow(() -> ApiException.notFound("node"));
         if (row.state() == NodeState.DRAINING) {
             return status(nodeId);
@@ -72,9 +69,8 @@ public class DrainController {
     }
 
     @PostMapping("/drain/cancel")
-    public DrainStatus cancel(@RequestHeader(value = AdminGuard.HEADER, required = false) String token,
-                              @PathVariable String nodeId) {
-        String actor = guard.requireAdmin(token);
+    public DrainStatus cancel(@PathVariable String nodeId) {
+        String actor = guard.requireAdmin();
         NodeRepository.NodeRow row = nodes.find(nodeId).orElseThrow(() -> ApiException.notFound("node"));
         if (row.state() != NodeState.DRAINING) {
             throw new ApiException(HttpStatus.CONFLICT, "NOT_DRAINING", "node is " + row.state());

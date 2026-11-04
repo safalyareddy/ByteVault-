@@ -21,7 +21,6 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -42,10 +41,10 @@ public class DlqAdminController {
     private final JdbcClient jdbc;
     private final KafkaTemplate<String, String> kafka;
     private final AuditWriter audit;
-    private final AdminGuard guard;
+    private final dev.bytevault.controlplane.security.CurrentUser guard;
 
     public DlqAdminController(JdbcClient jdbc, KafkaTemplate<String, String> kafka, AuditWriter audit,
-                              AdminGuard guard) {
+                              dev.bytevault.controlplane.security.CurrentUser guard) {
         this.jdbc = jdbc;
         this.kafka = kafka;
         this.audit = audit;
@@ -58,10 +57,9 @@ public class DlqAdminController {
                            int replayCount, OffsetDateTime lastReplayedAt, String lastReplayedBy) {}
 
     @GetMapping
-    public List<DlqEntry> list(@RequestHeader(value = AdminGuard.HEADER, required = false) String token,
-                               @RequestParam(defaultValue = "PENDING") String status,
+    public List<DlqEntry> list(@RequestParam(defaultValue = "PENDING") String status,
                                @RequestParam(defaultValue = "50") int limit) {
-        guard.requireAdmin(token);
+        guard.requireAdmin();
         if (!status.equals("PENDING") && !status.equals("REPLAYED") && !status.equals("ALL")) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_PARAMETER", "status must be PENDING, REPLAYED or ALL");
         }
@@ -80,9 +78,8 @@ public class DlqAdminController {
                           UUID eventId, long version) {}
 
     @PostMapping("/{id}/replay")
-    public Map<String, Object> replay(@RequestHeader(value = AdminGuard.HEADER, required = false) String token,
-                                      @PathVariable UUID id, @Valid @RequestBody ReplayRequest request) {
-        String actor = guard.requireAdmin(token);
+    public Map<String, Object> replay(@PathVariable UUID id, @Valid @RequestBody ReplayRequest request) {
+        String actor = guard.requireAdmin();
         Stored entry = jdbc.sql("SELECT original_topic, original_key, payload, status, replay_count, event_id, version "
                         + "FROM dlq_events WHERE id = :id").param("id", id).query(Stored.class).optional()
                 .orElseThrow(() -> ApiException.notFound("DLQ entry"));

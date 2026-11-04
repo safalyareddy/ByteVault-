@@ -75,9 +75,10 @@ other packages do not reach into its repositories.
 
 ## Trust boundaries
 
-1. **Client to control plane:** an authenticated public API (USER/ADMIN) on
-   `127.0.0.1:8090`. Every client input is untrusted, and filenames are only
-   display metadata.
+1. **Client to control plane:** the public API on `127.0.0.1:8090`. Clients
+   authenticate with opaque bearer tokens from `POST /api/v1/auth/login`, and
+   access depends on role (USER or ADMIN). Every client input is untrusted,
+   and filenames are only display metadata.
 2. **Control plane to storage node:** an internal HTTP API on the Compose
    network. Requests are HMAC-signed with a per-node secret and a timestamp.
    See [storage-node-protocol.md](storage-node-protocol.md).

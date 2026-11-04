@@ -3,6 +3,12 @@
 .env.*
 !.env.example
 
+# CLI login token (scripts/bv.sh login)
+.bv-token
+
+# Local database backups
+backups/
+
 # Build output
 target/
 frontend/dist/

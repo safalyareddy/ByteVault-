@@ -4,13 +4,14 @@
 #   scripts/fault/corrupt-chunk.sh <objectId> <chunkIndex> <node-N>
 # Expected: the next scrub (or a download) marks that replica CORRUPT, the object DEGRADED, and
 # repair restores a verified copy. Trigger a scrub now with:
-#   curl -s -X POST -H "X-BV-Admin-Token: $BV_ADMIN_TOKEN" 127.0.0.1:8090/api/v1/admin/scrub | jq
+#   curl -s -X POST -H "Authorization: Bearer $(cat .bv-token)" 127.0.0.1:8090/api/v1/admin/scrub | jq   (after scripts/bv.sh login)
 source "$(dirname "$0")/../lib.sh"
 require_env_file
 object="${1:-}"; index="${2:-}"; node="${3:-}"
 [[ "$object" =~ ^[0-9a-f-]{36}$ && "$index" =~ ^[0-9]+$ && "$node" =~ ^node-[1-4]$ ]] \
   || { echo "usage: $0 <objectId> <chunkIndex> <node-N>" >&2; exit 2; }
-detail=$(curl -fsS "http://127.0.0.1:${BV_BACKEND_HOST_PORT:-8090}/api/v1/objects/$object") || { echo "object not found" >&2; exit 1; }
+[[ -f "$ROOT/.bv-token" ]] || { echo "log in first: scripts/bv.sh login" >&2; exit 1; }
+detail=$(curl -fsS -H "Authorization: Bearer $(cat "$ROOT/.bv-token")" "http://127.0.0.1:${BV_BACKEND_HOST_PORT:-8090}/api/v1/objects/$object") || { echo "object not found" >&2; exit 1; }
 name=$(jq -r .object.name <<<"$detail")
 [[ "$name" == disposable-* ]] || { echo "refusing: object name '$name' does not start with 'disposable-'" >&2; exit 1; }
 chunk=$(jq -r --argjson i "$index" '.chunks[] | select(.index == $i) | .chunkId' <<<"$detail")

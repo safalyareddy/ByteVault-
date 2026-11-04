@@ -6,14 +6,15 @@ across independent storage-node processes. PostgreSQL holds the authoritative
 metadata, Kafka carries domain events through a transactional outbox, and the
 system detects failures and repairs from verified replicas.
 
-> **Status:** Phases 0–5 are done. Chunked upload and
+> **Status:** Phases 0–6 are done. Chunked upload and
 > download work, with 3 checksum-verified replicas on distinct nodes, signed node
 > heartbeats with admission and failure detection,
 > read-path corruption detection, asynchronous delete, and Kafka events through
 > a transactional outbox with idempotent consumers, a DLQ and guarded replay.
 > Self-healing works: OFFLINE detection, repair from verified replicas, a
-> checksum scrubber, rejoin reconciliation and drain. Authentication and the
-> dashboard are **not implemented yet**.
+> checksum scrubber, rejoin reconciliation and drain. Security covers USER/ADMIN
+> roles, hashed revocable tokens, rate and size limits, backup and
+> reconciliation. The operations dashboard is **not implemented yet**.
 > The exact state, with test evidence, is in
 > [docs/implementation-status.md](docs/implementation-status.md).
 
@@ -45,7 +46,8 @@ scripts/gen-env.sh      # creates .env with random local secrets (never overwrit
 scripts/build.sh        # mvn package (unit tests) + frontend build
 scripts/up.sh           # starts the stack and waits for /api/v1/health
 scripts/status.sh       # container state + every health endpoint
-scripts/bv.sh nodes     # node inventory
+scripts/bv.sh login     # admin password = BV_BOOTSTRAP_ADMIN_PASSWORD in .env
+scripts/bv.sh nodes     # node inventory (ADMIN)
 scripts/bv.sh upload ./some-file          # prints the object id
 scripts/bv.sh download <objectId> ./copy  # verifies size; compare with shasum -a 256
 cd frontend && npm run dev   # console at http://127.0.0.1:5173
@@ -96,6 +98,7 @@ cd frontend && npm run typecheck && npm run build
 - [Kafka topics and events](docs/kafka-events.md)
 - [Storage-node protocol](docs/storage-node-protocol.md)
 - [Security threat model](docs/security-threat-model.md)
+- [Operations runbook](docs/operations-runbook.md): accounts, backup/restore, reconciliation, failure handling
 - [Implementation status](docs/implementation-status.md)
 
 ## Limitations

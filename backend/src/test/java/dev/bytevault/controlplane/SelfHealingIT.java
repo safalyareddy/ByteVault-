@@ -57,13 +57,11 @@ import org.testcontainers.junit.jupiter.Testcontainers;
         "bytevault.repair.reconcile-interval=1s",
         "bytevault.repair.capacity-wait=2s",
         "bytevault.repair.scrub.enabled=false",
-        "bytevault.repair.scrub.pause-between-chunks=0ms",
-        "bytevault.admin-token=" + SelfHealingIT.ADMIN_TOKEN})
+        "bytevault.repair.scrub.pause-between-chunks=0ms"})
 @Import(ContainersConfig.class)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class SelfHealingIT {
 
-    static final String ADMIN_TOKEN = "self-healing-admin-token-0123456789abcd";
     static final int CHUNK = 1024 * 1024;
     static final String DATA_DIR = "/var/lib/bytevault/node";
     static final List<String> IDS = List.of("node-1", "node-2", "node-3", "node-4");
@@ -224,13 +222,19 @@ class SelfHealingIT {
         DockerClientFactory.instance().client().unpauseContainerCmd(NODES.get(id).getContainerId()).exec();
     }
 
+    static final String ADMIN_TOKEN = null; // the logged-in admin's token (TestAuth interceptor)
+    static final String NO_TOKEN = "not-a-real-token-0000000000";
+
+    /** {@code token == null}: use the logged-in admin; otherwise send that (invalid) bearer token. */
     HttpHeaders admin(String token) {
-        HttpHeaders h = new HttpHeaders();
+        HttpHeaders h = token == null ? new HttpHeaders() : TestAuth.bearer(token);
         h.setContentType(MediaType.APPLICATION_JSON);
-        if (token != null) {
-            h.set("X-BV-Admin-Token", token);
-        }
         return h;
+    }
+
+    @org.junit.jupiter.api.BeforeEach
+    void login() {
+        TestAuth.asAdmin(http);
     }
 
     // ------------------------------------------------------------------ tests
@@ -298,7 +302,7 @@ class SelfHealingIT {
         assertThat(exec.getStdout()).contains("ok");
         assertThat(shaOnNode(victim, chunkId)).isNotEqualTo(chunkSha(chunkId));
 
-        assertThat(http.exchange("/api/v1/admin/scrub", HttpMethod.POST, new HttpEntity<>(admin(null)), JsonNode.class)
+        assertThat(http.exchange("/api/v1/admin/scrub", HttpMethod.POST, new HttpEntity<>(admin(NO_TOKEN)), JsonNode.class)
                 .getStatusCode().value()).isEqualTo(401);
         JsonNode summary = http.exchange("/api/v1/admin/scrub", HttpMethod.POST, new HttpEntity<>(admin(ADMIN_TOKEN)),
                 JsonNode.class).getBody();
@@ -331,7 +335,7 @@ class SelfHealingIT {
                 .filter(e -> e.getValue().contains(drained)).map(Map.Entry::getKey).toList();
         String path = "/api/v1/nodes/" + drained + "/drain";
 
-        assertThat(http.exchange(path, HttpMethod.POST, new HttpEntity<>(Map.of("reason", "x"), admin(null)),
+        assertThat(http.exchange(path, HttpMethod.POST, new HttpEntity<>(Map.of("reason", "x"), admin(NO_TOKEN)),
                 JsonNode.class).getStatusCode().value()).isEqualTo(401);
         JsonNode started = http.exchange(path, HttpMethod.POST,
                 new HttpEntity<>(Map.of("reason", "hardware swap"), admin(ADMIN_TOKEN)), JsonNode.class).getBody();
@@ -350,7 +354,7 @@ class SelfHealingIT {
         }
         assertThat(objectStatus(objectId)).as("drain never degrades the object").isEqualTo("COMPLETE");
         assertFullyReplicatedOnDisk(objectId);
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM audit_events WHERE resource_id = ? AND actor = 'admin-token' "
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM audit_events WHERE resource_id = ? AND actor = 'admin' "
                 + "AND details->>'to' = 'DRAINING'", Integer.class, drained)).isEqualTo(1);
 
         JsonNode cancelled = http.exchange(path + "/cancel", HttpMethod.POST, new HttpEntity<>(admin(ADMIN_TOKEN)),
@@ -400,6 +404,45 @@ class SelfHealingIT {
 
     @Test
     @Order(5)
+    void inventoryReconciliationFindsOrphansAndMissingFilesAndRepairsThem() throws Exception {
+        awaitAllHealthy();
+        byte[] data = random(CHUNK, 5);
+        String objectId = upload(data, "heal-reconcile-0001");
+        String chunkId = verifiedHolders(objectId).keySet().iterator().next();
+        String loser = verifiedHolders(objectId).get(chunkId).get(0);
+
+        // Missing: a VERIFIED replica's file vanishes (as if deleted after a metadata backup).
+        assertThat(NODES.get(loser).execInContainer("sh", "-c", "rm " + chunkPath(chunkId)).getExitCode()).isZero();
+        // Orphan: a chunk file no metadata knows about (as if written after a metadata backup).
+        String orphan = java.util.UUID.randomUUID().toString();
+        String orphanNode = IDS.stream().filter(n -> !n.equals(loser)).findFirst().orElseThrow();
+        assertThat(NODES.get(orphanNode).execInContainer("sh", "-c", "mkdir -p " + DATA_DIR + "/chunks/"
+                + orphan.substring(0, 2) + "/" + orphan.substring(2, 4) + " && echo stray > " + chunkPath(orphan))
+                .getExitCode()).isZero();
+
+        JsonNode dry = http.exchange("/api/v1/admin/reconcile", HttpMethod.POST, new HttpEntity<>(admin(ADMIN_TOKEN)),
+                JsonNode.class).getBody();
+        assertThat(dry.get("applied").asBoolean()).isFalse();
+        assertThat(dry.toString()).contains(orphan, chunkId);
+        assertThat(shaOnNode(orphanNode, orphan)).as("dry run changes nothing").isNotNull();
+        assertThat(verifiedHolders(objectId).get(chunkId)).contains(loser);
+
+        JsonNode applied = http.exchange("/api/v1/admin/reconcile?apply=true", HttpMethod.POST,
+                new HttpEntity<>(admin(ADMIN_TOKEN)), JsonNode.class).getBody();
+        assertThat(applied.get("applied").asBoolean()).isTrue();
+        assertThat(shaOnNode(orphanNode, orphan)).as("orphan deleted").isNull();
+        await("missing replica repaired", Duration.ofSeconds(60), () -> "COMPLETE".equals(objectStatus(objectId))
+                && verifiedHolders(objectId).get(chunkId).size() == 3);
+        assertFullyReplicatedOnDisk(objectId);
+        assertDownloadMatches(objectId, data);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM audit_events WHERE action = 'INVENTORY_RECONCILE'",
+                Integer.class)).isEqualTo(2);
+        assertThat(http.exchange("/api/v1/admin/reconcile", HttpMethod.POST, new HttpEntity<>(admin(NO_TOKEN)),
+                JsonNode.class).getStatusCode().value()).isEqualTo(401);
+    }
+
+    @Test
+    @Order(6)
     void repairApiAndMetricsReflectRealWork() {
         JsonNode repairs = http.getForEntity("/api/v1/repairs?state=COMMITTED&limit=200", JsonNode.class).getBody();
         assertThat(repairs.size()).isGreaterThanOrEqualTo(4);
@@ -414,7 +457,9 @@ class SelfHealingIT {
                 .isGreaterThanOrEqualTo(4);
         assertThat(meters.find("bv_checksum_failures_total").tag("path", "scrub").counter().count())
                 .isGreaterThanOrEqualTo(1);
-        assertThat(meters.find("bv_under_replicated_chunks").gauge().value()).isZero();
+        // Refreshed by the planner every second; wait for a fresh reading rather than a stale one.
+        await("no under-replicated chunks", Duration.ofSeconds(10),
+                () -> meters.find("bv_under_replicated_chunks").gauge().value() == 0);
         assertThat(meters.find("bv_repair_duration_seconds").timer().count()).isGreaterThanOrEqualTo(4);
     }
 }

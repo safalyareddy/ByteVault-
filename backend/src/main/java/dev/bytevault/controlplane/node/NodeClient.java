@@ -158,6 +158,34 @@ public class NodeClient {
         }
     }
 
+    /** Every chunk ID stored on a node (paged internally). Throws if the node cannot be listed. */
+    public java.util.Set<UUID> listChunks(String nodeId) throws IOException, InterruptedException {
+        java.util.Set<UUID> all = new java.util.HashSet<>();
+        String after = null;
+        do {
+            String path = NodeProtocol.CHUNKS_PATH;
+            String query = "?limit=1000" + (after == null ? "" : "&after=" + after);
+            NodeConfig node = node(nodeId);
+            RequestSigner.SignedHeaders h = node.signer().sign("GET", path, nodeId, NodeProtocol.NO_BODY);
+            HttpRequest req = HttpRequest.newBuilder(URI.create(node.endpoint() + path + query))
+                    .timeout(requestTimeout)
+                    .header(NodeProtocol.HEADER_NODE_ID, h.nodeId())
+                    .header(NodeProtocol.HEADER_TIMESTAMP, h.timestamp())
+                    .header(NodeProtocol.HEADER_CONTENT_SHA256, h.contentSha256())
+                    .header(NodeProtocol.HEADER_SIGNATURE, h.signature())
+                    .GET().build();
+            HttpResponse<byte[]> res = http.send(req, HttpResponse.BodyHandlers.ofByteArray());
+            if (res.statusCode() != 200) {
+                throw new IOException("listing chunks on " + nodeId + " returned HTTP " + res.statusCode());
+            }
+            var body = json.readTree(res.body());
+            body.path("chunkIds").forEach(id -> all.add(UUID.fromString(id.asText())));
+            after = body.path("nextAfter").isNull() || body.path("nextAfter").isMissingNode()
+                    ? null : body.path("nextAfter").asText();
+        } while (after != null);
+        return all;
+    }
+
     public enum ProbeResult { AUTHENTICATED, REJECTED, UNREACHABLE }
 
     /**

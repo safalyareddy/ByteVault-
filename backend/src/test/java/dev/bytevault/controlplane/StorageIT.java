@@ -133,6 +133,11 @@ class StorageIT {
     @Autowired JdbcTemplate jdbc;
     @Autowired ObjectMapper json;
 
+    @org.junit.jupiter.api.BeforeEach
+    void login() {
+        TestAuth.asAdmin(http);
+    }
+
     // ------------------------------------------------------------------ helpers
 
     static byte[] randomBytes(int size, long seed) {
@@ -464,7 +469,7 @@ class StorageIT {
         byte[] body = json.writeValueAsBytes(new dev.bytevault.protocol.Heartbeat("node-1", 1, "http://evil:9100",
                 "UP", true, 1, 1, Instant.now()));
 
-        // No signature at all.
+        // No signature at all (a user bearer token is irrelevant to node authentication).
         HttpHeaders unsigned = new HttpHeaders();
         unsigned.setContentType(MediaType.APPLICATION_JSON);
         assertThat(http.exchange(path, HttpMethod.POST, new HttpEntity<>(body, unsigned), JsonNode.class)

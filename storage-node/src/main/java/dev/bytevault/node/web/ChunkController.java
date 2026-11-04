@@ -93,6 +93,19 @@ public class ChunkController {
                 v.intact(), java.time.Instant.now()));
     }
 
+    public record ChunkPage(java.util.List<String> chunkIds, String nextAfter) {}
+
+    /** Paged inventory of stored chunk IDs (reconciliation after a metadata restore). */
+    @GetMapping(NodeProtocol.CHUNKS_PATH)
+    public ChunkPage list(@org.springframework.web.bind.annotation.RequestParam(required = false) String after,
+                          @org.springframework.web.bind.annotation.RequestParam(defaultValue = "1000") int limit)
+            throws IOException {
+        int bounded = Math.min(Math.max(limit, 1), 1000);
+        var ids = store.list(after == null ? null : NodeProtocol.parseChunkId(after), bounded);
+        var strings = ids.stream().map(UUID::toString).toList();
+        return new ChunkPage(strings, strings.size() == bounded ? strings.get(strings.size() - 1) : null);
+    }
+
     @DeleteMapping(NodeProtocol.CHUNKS_PATH + "/{chunkId}")
     public ResponseEntity<Void> delete(@PathVariable String chunkId) throws IOException {
         store.delete(NodeProtocol.parseChunkId(chunkId));

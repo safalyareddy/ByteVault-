@@ -1,6 +1,5 @@
 package dev.bytevault.controlplane.repair;
 
-import dev.bytevault.controlplane.admin.AdminGuard;
 import dev.bytevault.controlplane.audit.AuditWriter;
 import dev.bytevault.controlplane.web.ApiException;
 import java.time.OffsetDateTime;
@@ -12,7 +11,6 @@ import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -26,11 +24,14 @@ public class RepairController {
 
     private final JdbcClient jdbc;
     private final Scrubber scrubber;
-    private final AdminGuard guard;
+    private final InventoryReconciler inventory;
+    private final dev.bytevault.controlplane.security.CurrentUser guard;
     private final AuditWriter audit;
 
-    public RepairController(JdbcClient jdbc, Scrubber scrubber, AdminGuard guard, AuditWriter audit) {
+    public RepairController(JdbcClient jdbc, Scrubber scrubber, dev.bytevault.controlplane.security.CurrentUser guard,
+                            AuditWriter audit, InventoryReconciler inventory) {
         this.jdbc = jdbc;
+        this.inventory = inventory;
         this.scrubber = scrubber;
         this.guard = guard;
         this.audit = audit;
@@ -58,11 +59,19 @@ public class RepairController {
                 .query(RepairView.class).list();
     }
 
+    /**
+     * Node inventory vs metadata (after a database restore). Dry run unless {@code apply=true}.
+     * ADMIN only, audited.
+     */
+    @PostMapping("/admin/reconcile")
+    public InventoryReconciler.Report reconcile(@RequestParam(defaultValue = "false") boolean apply) {
+        return inventory.run(apply, guard.requireAdmin());
+    }
+
     /** Runs one scrub pass now (admin, audited). Useful for demos; the scheduler runs it anyway. */
     @PostMapping("/admin/scrub")
-    public Scrubber.ScrubSummary scrubNow(@RequestHeader(value = AdminGuard.HEADER, required = false) String token,
-                                         @RequestParam(defaultValue = "1000") int limit) {
-        String actor = guard.requireAdmin(token);
+    public Scrubber.ScrubSummary scrubNow(@RequestParam(defaultValue = "1000") int limit) {
+        String actor = guard.requireAdmin();
         Scrubber.ScrubSummary summary = scrubber.scrub(Math.min(Math.max(limit, 1), 10_000));
         audit.record(actor, "SCRUB_RUN", "CLUSTER", "scrub", Map.of("limit", limit, "checked", summary.checked(),
                 "corrupt", summary.corrupt(), "missing", summary.missing()));
