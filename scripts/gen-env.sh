@@ -13,5 +13,6 @@ sed -e "s/^DATABASE_PASSWORD=.*/DATABASE_PASSWORD=$(secret)/" \
     -e "s/^BV_NODE_2_SECRET=.*/BV_NODE_2_SECRET=$(secret)/" \
     -e "s/^BV_NODE_3_SECRET=.*/BV_NODE_3_SECRET=$(secret)/" \
     -e "s/^GRAFANA_ADMIN_PASSWORD=.*/GRAFANA_ADMIN_PASSWORD=$(secret)/" \
+    -e "s/^BV_ADMIN_TOKEN=.*/BV_ADMIN_TOKEN=$(secret)/" \
     "$ROOT/.env.example" > "$ENV_FILE"
 echo "Wrote $ENV_FILE (mode 600) with random secrets."

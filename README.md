@@ -6,11 +6,12 @@ across independent storage-node processes. PostgreSQL holds the authoritative
 metadata, Kafka carries domain events through a transactional outbox, and the
 system detects failures and repairs from verified replicas.
 
-> **Status:** Phases 0–3 are done. Chunked upload and
+> **Status:** Phases 0–4 are done. Chunked upload and
 > download work, with 3 checksum-verified replicas on distinct nodes, signed node
 > heartbeats with admission and failure detection,
-> read-path corruption detection and asynchronous delete. Kafka publishing,
-> automatic repair, the scrubber, authentication and the dashboard are **not
+> read-path corruption detection, asynchronous delete, and Kafka events through
+> a transactional outbox with idempotent consumers, a DLQ and guarded replay.
+> Automatic repair, the scrubber, authentication and the dashboard are **not
 > implemented yet**.
 > The exact state, with test evidence, is in
 > [docs/implementation-status.md](docs/implementation-status.md).

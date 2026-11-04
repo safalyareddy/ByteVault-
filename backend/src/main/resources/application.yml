@@ -44,10 +44,28 @@ spring:
       operation-timeout: 10s
     producer:
       acks: all
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
       properties:
         enable.idempotence: true
+        max.in.flight.requests.per.connection: 5
+        # Fail fast during a broker outage; the outbox keeps the events and retries.
+        max.block.ms: 5000
+        request.timeout.ms: 5000
+        delivery.timeout.ms: 12000
+        linger.ms: 5
+    consumer:
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      max-poll-records: 50
+    listener:
+      ack-mode: record
+      missing-topics-fatal: false
 
 bytevault:
+  admin-token: ${BV_ADMIN_TOKEN:}
   chunk-size-bytes: ${BV_CHUNK_SIZE_BYTES:4194304}
   replication-factor: ${BV_REPLICATION_FACTOR:3}
   max-upload-bytes: ${BV_MAX_UPLOAD_BYTES:1073741824}

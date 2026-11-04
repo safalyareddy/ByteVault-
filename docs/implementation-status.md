@@ -23,7 +23,15 @@ automated tests, and a live run on the Compose stack confirmed them:
 - a heartbeat-age failure detector
 - capacity-aware rendezvous placement
 - RF=3 with every replica verified on distinct nodes
-**Phase 4** (Kafka outbox publisher, consumers, retries, DLQ) is next.
+**Phase 4:** **gate met** on 2026-11-04. All of these are covered by
+automated tests against a real broker, and a live Kafka outage confirmed them
+on the Compose stack:
+- outbox publisher
+- idempotent consumers
+- bounded retries with jitter
+- DLQ
+- guarded, audited replay
+**Phase 5** (OFFLINE detection, repair engine, scrubber, drain) is next.
 
 ## Requirements
 
@@ -65,7 +73,18 @@ automated tests, and a live run on the Compose stack confirmed them:
 | P3-9 | Capacity-aware placement (chunk + configurable reserve), never silently fewer targets | Implemented | `backend/.../placement/PlacementPolicy.java` | `mvn test` | 2026-11-04 | `PlacementPolicyTest` 5/5, including the exact reserve boundary, non-HEALTHY exclusion and unsatisfiable placement. Capacity reflects the Docker VM disk (note 2) |
 | P3-10 | Node metrics: `bv_node_heartbeat_age_seconds`, `bv_node_state`, `bv_node_capacity_bytes`, `bv_node_usable_bytes`, `bv_heartbeats_rejected_total` | Implemented | `FailureDetector`, `HeartbeatController` | `curl :8090/actuator/prometheus` | 2026-11-04 | live: age 0, `bv_node_state{state="HEALTHY"}` = 1 for all 3 nodes |
 | P3-11 | OFFLINE transition + replica LOST marking | Not started | - | - | - | Phase 5 (the transition is allowed in the table but nothing triggers it yet) |
-| P2-10 | Outbox rows written in the same transaction as state changes | Partial | `backend/.../outbox/OutboxWriter.java` | live DB query | 2026-11-04 | rows are recorded (refuses to run outside a transaction); **not published**, since the publisher is Phase 4 |
+| P2-10 | Outbox rows written in the same transaction as state changes | Implemented | `backend/.../outbox/OutboxWriter.java` | `mvn verify` | 2026-11-04 | refuses to run outside a transaction; rows published by P4-1 |
+| P4-1 | Outbox publisher: SKIP LOCKED claim, ordered send with aggregate key, acked-prefix marking, global backoff with jitter | Implemented | `backend/.../outbox/OutboxPublisher.java` | `mvn verify` (`KafkaReliabilityIT`) | 2026-11-04 | published_at set after the ack; outage test below. Live: 12 events left over from Phases 2–3 were published on deploy, and the projection matched the database |
+| P4-2 | Idempotent consumers: `processed_events` in the effect transaction, aggregate-version check | Implemented | `backend/.../events/IdempotentProcessor.java`, `ObjectStatsConsumer`, `TimelineConsumer` | `mvn verify` | 2026-11-04 | `duplicateDeliveryProducesOneLogicalEffect` (same message sent twice → +777 bytes once, 1 timeline row) |
+| P4-3 | Crash between effect commit and offset ack is safe | Implemented | `IdempotentProcessor`, `AckMode.RECORD` | `mvn verify` | 2026-11-04 | `crashAfterCommitBeforeAckIsRedeliveredAndSkipped`: injected crash → redelivery observed → applied once, no DLQ |
+| P4-4 | Bounded exponential retry with ±20% jitter, then DLQ with topic/key/event ID/reason/attempts/timestamp/correlation ID/group | Implemented | `JitteredBackOff`, `KafkaConsumerConfig`, `DlqRecorder` | `mvn verify` | 2026-11-04 | `JitteredBackOffTest` 22/22; 2 transient failures → 3 calls, applied once; permanent failure → exactly 5 attempts → DLQ row with every field asserted |
+| P4-5 | Malformed messages skip retries | Implemented | `InvalidEventException` (not retryable) | `mvn verify` | 2026-11-04 | poison message → one DLQ entry per consumer group, attempts = 1 |
+| P4-6 | Guarded replay keeps the event ID, CAS-claimed, audited with operator/reason/attempt | Implemented | `backend/.../admin/DlqAdminController.java`, `AdminGuard.java` | `mvn verify`; live curl | 2026-11-04 | IT: no/wrong token 401, missing reason 400, replay → applied once, timeline deduplicated it, second replay 409, audit row asserted. Live: 401/401/200; token in logs 0 times |
+| P4-7 | Kafka outage: outbox accumulates, drains on recovery | Implemented | `OutboxPublisher` | `mvn verify`; live `docker compose stop kafka` | 2026-11-04 | IT: broker paused → 5 events held → unpaused → drained, applied once. Live: upload succeeded during the outage, backlog 4, health 503, stats `consistent:false`; Kafka started → drained in 4 s → `consistent:true`; download SHA-256 matches |
+| P4-8 | Stopped consumer catches up without loss or duplication | Implemented | listener containers | `mvn verify` | 2026-11-04 | stats container stopped, 5 events published, restarted → exactly +1500 bytes |
+| P4-9 | Event timeline and stats APIs (projection next to the authoritative counts) | Implemented | `backend/.../events/EventQueryController.java` | live curl | 2026-11-04 | `GET /api/v1/events`, `GET /api/v1/stats` |
+| P4-10 | Outbox/consumer metrics: backlog, oldest age, published, failures, consumed (applied/duplicate), retries, dead-lettered | Implemented | publisher, processor, error handler | `curl :8090/actuator/prometheus` | 2026-11-04 | live values seen. Note: `bv_outbox_publish_failures_total` only increments once a send times out (≤15 s), so it can read 0 early in an outage |
+| P4-11 | Consumer lag metric | Partial | Kafka client metrics through Micrometer | - | - | relies on the standard `kafka_consumer_fetch_manager_records_lag_max`; not yet checked on the live stack |
 | P4-* | Outbox, consumers, retries, DLQ, replay | Not started | | | | |
 | P5-* | Heartbeats, failure detection, repair, scrubber, drain | Not started | | | | |
 | P6-* | Auth (USER/ADMIN), node auth enforcement, rate limits | Not started | | | | |
@@ -85,6 +104,8 @@ automated tests, and a live run on the Compose stack confirmed them:
 | 2026-11-04 | scan of every container log for the 4 values in `.env` | 0 occurrences |
 | 2026-11-04 | `mvn -B -ntp verify` (Phase 2) | **58 tests, 0 failures, 0 skipped**: node-protocol 6, storage-node 19, backend unit 17, backend IT 16 (`FoundationIT` 8, `StorageIT` 8, with 3 real node containers) |
 | 2026-11-04 | `mvn -B -ntp verify` (Phase 3) | **71 tests, 0 failures, 0 skipped**: node-protocol 6, storage-node 21, backend unit 27, backend IT 17 (`StorageIT` 9 with 5 node containers, 2 of them deliberately misconfigured) |
+| 2026-11-04 | `mvn -B -ntp verify` (Phase 4) | **101 tests, 0 failures, 0 skipped**: node-protocol 6, storage-node 21, backend unit 49, backend IT 25 (`FoundationIT` 8, `StorageIT` 9, `KafkaReliabilityIT` 8) |
+| 2026-11-04 | live: `docker compose stop kafka`, upload 6 MB, `start kafka` | upload OK during the outage; backlog 4 → 0 within 4 s of restart; projection consistent; SHA-256 matches |
 | 2026-11-04 | live: `docker compose pause node-2`, upload, unpause, upload | SUSPECT after 16 s; upload refused with 503 `INSUFFICIENT_HEALTHY_NODES`; HEALTHY on resume; next 1 MB upload round-trips with matching SHA-256 |
 | 2026-11-04 | live stack: `scripts/bv.sh upload` of a 25 MiB random file → `download` → `shasum -a 256` | 7 chunks, each VERIFIED on node-1/2/3; downloaded sha256 `044abd8d…5aa8` equals the original; re-running the upload replays the same object (1 row in `objects`) |
 
@@ -119,5 +140,7 @@ automated tests, and a live run on the Compose stack confirmed them:
 5. Docker Desktop hung twice during the session, the second time after disk
    space ran low. Each time a force-restart restored it; no code changes were
    needed.
-6. The public API is unauthenticated until Phase 6. Every request acts as
+6. Admin actions (DLQ replay) use an interim shared token (`BV_ADMIN_TOKEN`)
+   until Phase 6 roles exist. The audit actor is `admin-token`, not a person.
+7. The public API is unauthenticated until Phase 6. Every request acts as
    owner `local-dev`, and the API is bound to 127.0.0.1 only.

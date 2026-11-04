@@ -39,9 +39,11 @@ public class DeletionService {
 
     public String requestDelete(String owner, UUID objectId, String actor) {
         return tx.execute(t -> {
-            String status = jdbc.sql("SELECT status FROM objects WHERE id = :id AND owner_id = :o FOR UPDATE")
-                    .param("id", objectId).param("o", owner).query(String.class).optional()
+            record Current(String status, long totalSize) {}
+            Current current = jdbc.sql("SELECT status, total_size FROM objects WHERE id = :id AND owner_id = :o FOR UPDATE")
+                    .param("id", objectId).param("o", owner).query(Current.class).optional()
                     .orElseThrow(() -> ApiException.notFound("object"));
+            String status = current.status();
             if (status.equals("DELETING") || status.equals("DELETED")) {
                 return status;
             }
@@ -56,7 +58,8 @@ public class DeletionService {
                      WHERE chunk_id IN (SELECT id FROM chunks WHERE object_id = :id) AND state <> 'DELETED'
                     """).param("id", objectId).update();
             outbox.append("OBJECT", objectId.toString(), version, "ObjectDeleteRequested", Topics.OBJECT_EVENTS,
-                    objectId.toString(), Map.of("objectId", objectId, "actor", actor, "previousStatus", status));
+                    objectId.toString(), Map.of("objectId", objectId, "actor", actor, "previousStatus", status,
+                            "totalSize", current.totalSize()));
             return "DELETING";
         });
     }
