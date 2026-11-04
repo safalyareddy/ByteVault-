@@ -37,6 +37,10 @@ public final class NodeProtocol {
         return CHUNKS_PATH + "/" + chunkId;
     }
 
+    public static String verifyPath(UUID chunkId) {
+        return chunkPath(chunkId) + "/verify";
+    }
+
     /**
      * Parses a chunk ID only in canonical lowercase form, so one chunk can never be addressed by
      * two different strings (and therefore two different file paths).

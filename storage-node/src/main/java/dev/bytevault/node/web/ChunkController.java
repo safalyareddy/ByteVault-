@@ -77,6 +77,22 @@ public class ChunkController {
                 .body(body);
     }
 
+    public record VerifyResult(String chunkId, String storedSha256, String actualSha256, long sizeBytes,
+                               boolean intact, java.time.Instant verifiedAt) {}
+
+    /** Re-hashes the bytes on disk. The caller compares {@code actualSha256} with its metadata. */
+    @org.springframework.web.bind.annotation.PostMapping(NodeProtocol.CHUNKS_PATH + "/{chunkId}/verify")
+    public ResponseEntity<?> verify(@PathVariable String chunkId) throws IOException {
+        UUID id = NodeProtocol.parseChunkId(chunkId);
+        var result = store.verify(id);
+        if (result.isEmpty()) {
+            return NodeErrors.entity(404, "CHUNK_NOT_FOUND", "chunk not stored on this node");
+        }
+        var v = result.get();
+        return ResponseEntity.ok(new VerifyResult(id.toString(), v.storedSha256(), v.actualSha256(), v.sizeBytes(),
+                v.intact(), java.time.Instant.now()));
+    }
+
     @DeleteMapping(NodeProtocol.CHUNKS_PATH + "/{chunkId}")
     public ResponseEntity<Void> delete(@PathVariable String chunkId) throws IOException {
         store.delete(NodeProtocol.parseChunkId(chunkId));

@@ -72,8 +72,16 @@ stateDiagram-v2
     CORRUPT --> DELETING: cleanup after repair commit
     LOST --> DELETING: cleanup after repair commit
     FAILED_WRITE --> PENDING: chunk PUT retry
+    CORRUPT --> PENDING: in-place repair (corrupt bytes deleted first)
+    LOST --> PENDING: repair targets this node again
+    LOST --> DELETING: rejoined but excess, missing or damaged
+    VERIFIED --> DELETING: superseded copy on a DRAINING node
     DELETING --> DELETED
 ```
+
+Superseded copies (CORRUPT, LOST, or VERIFIED on a DRAINING node) move to
+DELETING only inside the repair-commit transaction, and only once the chunk
+has RF VERIFIED copies on non-draining nodes (`ReplicationStatus.retireSuperseded`).
 
 `UNIQUE(chunk_id, node_id)` means a node holds at most one replica row per
 chunk. A retry reuses that row and never creates a duplicate.
@@ -102,7 +110,7 @@ Heartbeats drive the transitions ([ADR-0010](adr/0010-push-heartbeats-and-admiss
 | HEALTHY | SUSPECT | failure detector | no heartbeat for `BV_SUSPECT_AFTER` |
 | HEALTHY | SUSPECT | heartbeat content | node reports DOWN or an unwritable data directory |
 | SUSPECT | HEALTHY | heartbeat | an UP heartbeat |
-| SUSPECT | OFFLINE | failure detector | no heartbeat for `BV_OFFLINE_AFTER` (**Phase 5**, not active yet) |
+| SUSPECT | OFFLINE | failure detector | no heartbeat for `BV_OFFLINE_AFTER`; in the same transaction its VERIFIED replicas become LOST |
 | OFFLINE | JOINING | heartbeat | the node must be re-admitted |
 
 The allowed-transition table is enforced in code (`NodeLifecycle`) and

@@ -57,7 +57,10 @@ import org.testcontainers.junit.jupiter.Testcontainers;
         "bytevault.deletion-interval=1s",
         "bytevault.cluster.node-request-timeout=10s",
         "bytevault.cluster.admission-heartbeats=2",
-        "bytevault.failure-detector-interval=500ms"})
+        "bytevault.failure-detector-interval=500ms",
+        // Phase 2/3 assertions observe faults before anything heals them; SelfHealingIT covers repair.
+        "bytevault.repair.enabled=false",
+        "bytevault.repair.scrub.enabled=false"})
 @Import(ContainersConfig.class)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class StorageIT {

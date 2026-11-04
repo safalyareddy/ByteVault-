@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Starts the local stack (non-destructive) and waits for health. Run scripts/build.sh first.
+# Optional profiles: scripts/up.sh --profile spare --profile monitoring
 source "$(dirname "$0")/lib.sh"
 require_env_file
 require_docker
@@ -7,7 +8,7 @@ for jar in backend/target/bytevault-backend.jar storage-node/target/bytevault-st
   [[ -f "$ROOT/$jar" ]] || { echo "Missing $jar; run scripts/build.sh first." >&2; exit 1; }
 done
 
-compose up -d --build "$@"
+compose "$@" up -d --build
 
 port="$(grep -E '^BV_BACKEND_HOST_PORT=' "$ENV_FILE" | cut -d= -f2 || true)"
 url="http://127.0.0.1:${port:-8090}/api/v1/health"

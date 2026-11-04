@@ -131,6 +131,34 @@ public class ChunkStore {
         return Optional.of(new StoredChunk(file, sha, Files.size(file)));
     }
 
+    public record Verification(String storedSha256, String actualSha256, long sizeBytes) {
+        public boolean intact() {
+            return storedSha256.equals(actualSha256);
+        }
+    }
+
+    /**
+     * Re-reads the chunk from disk and hashes it, independently of the write-time sidecar. Used by
+     * the scrubber and by repair to verify a target. Empty if the chunk is absent.
+     */
+    public Optional<Verification> verify(UUID chunkId) throws IOException {
+        Optional<StoredChunk> found = find(chunkId);
+        if (found.isEmpty()) {
+            return Optional.empty();
+        }
+        MessageDigest digest = Sha256.newDigest();
+        long total = 0;
+        try (InputStream in = Files.newInputStream(found.get().file())) {
+            byte[] buf = new byte[BUFFER_BYTES];
+            int n;
+            while ((n = in.read(buf)) != -1) {
+                digest.update(buf, 0, n);
+                total += n;
+            }
+        }
+        return Optional.of(new Verification(found.get().sha256(), Sha256.hex(digest.digest()), total));
+    }
+
     /** Deletes the chunk and its sidecar. Returns false if it was already absent. Idempotent. */
     public boolean delete(UUID chunkId) throws IOException {
         ReentrantLock lock = lockFor(chunkId);

@@ -106,6 +106,25 @@ class ChunkStoreTest {
     }
 
     @Test
+    void verifyRehashesDiskBytesAndDetectsCorruption() throws Exception {
+        byte[] data = random(50_000, 8);
+        UUID id = UUID.randomUUID();
+        store.put(id, new ByteArrayInputStream(data), data.length, Sha256.of(data));
+        assertThat(store.verify(id).orElseThrow().intact()).isTrue();
+
+        Path file = store.find(id).orElseThrow().file();
+        byte[] corrupted = data.clone();
+        corrupted[100] ^= 0x01; // single bit flip
+        Files.write(file, corrupted);
+
+        var v = store.verify(id).orElseThrow();
+        assertThat(v.intact()).isFalse();
+        assertThat(v.storedSha256()).isEqualTo(Sha256.of(data));
+        assertThat(v.actualSha256()).isEqualTo(Sha256.of(corrupted));
+        assertThat(store.verify(UUID.randomUUID())).isEmpty();
+    }
+
+    @Test
     void deleteIsIdempotent() throws Exception {
         byte[] data = random(10, 7);
         UUID id = UUID.randomUUID();

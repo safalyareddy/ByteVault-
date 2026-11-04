@@ -81,6 +81,16 @@ bytevault:
     upload-session-ttl: ${BV_UPLOAD_SESSION_TTL:24h}
     admission-heartbeats: ${BV_ADMISSION_HEARTBEATS:2}
     node-free-space-reserve-bytes: ${BV_NODE_FREE_SPACE_RESERVE_BYTES:268435456}
+  repair:
+    enabled: ${BV_REPAIR_ENABLED:true}
+    max-concurrent: ${BV_REPAIR_MAX_CONCURRENT:2}
+    lease: ${BV_REPAIR_LEASE:2m}
+    max-attempts: ${BV_REPAIR_MAX_ATTEMPTS:5}
+    capacity-wait: ${BV_REPAIR_CAPACITY_WAIT:30s}
+    scrub:
+      enabled: ${BV_SCRUB_ENABLED:true}
+      batch-size: ${BV_SCRUB_BATCH_SIZE:50}
+      pause-between-chunks: ${BV_SCRUB_PAUSE:20ms}
   kafka:
     topic-partitions: ${BV_KAFKA_TOPIC_PARTITIONS:3}
     topic-replication-factor: ${BV_KAFKA_TOPIC_REPLICATION:1}

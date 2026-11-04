@@ -56,6 +56,11 @@ public final class NodeLifecycle {
         };
     }
 
+    /** True when a SUSPECT node has been silent longer than the offline threshold. */
+    public static boolean shouldMarkOffline(NodeState state, Duration heartbeatAge, Duration offlineAfter) {
+        return state == SUSPECT && (heartbeatAge == null || heartbeatAge.compareTo(offlineAfter) > 0);
+    }
+
     /** True when a HEALTHY node has been silent longer than the suspect threshold. */
     public static boolean shouldSuspect(NodeState state, Duration heartbeatAge, Duration suspectAfter) {
         return state == HEALTHY && (heartbeatAge == null || heartbeatAge.compareTo(suspectAfter) > 0);

@@ -87,8 +87,9 @@ services:
       BV_SUSPECT_AFTER: ${BV_SUSPECT_AFTER:-15s}
       BV_OFFLINE_AFTER: ${BV_OFFLINE_AFTER:-45s}
       BV_SCRUB_INTERVAL: ${BV_SCRUB_INTERVAL:-10m}
-      BV_NODES: node-1=http://node-1:9100,node-2=http://node-2:9100,node-3=http://node-3:9100
-      BV_NODE_SECRETS: node-1:${BV_NODE_1_SECRET:?set in .env},node-2:${BV_NODE_2_SECRET:?set in .env},node-3:${BV_NODE_3_SECRET:?set in .env}
+      # node-4 is a spare (profile "spare"): configured always, it only joins when started.
+      BV_NODES: node-1=http://node-1:9100,node-2=http://node-2:9100,node-3=http://node-3:9100,node-4=http://node-4:9100
+      BV_NODE_SECRETS: node-1:${BV_NODE_1_SECRET:?set in .env},node-2:${BV_NODE_2_SECRET:?set in .env},node-3:${BV_NODE_3_SECRET:?set in .env},node-4:${BV_NODE_4_SECRET:?set in .env}
       BV_MAX_CONCURRENT_CHUNK_TRANSFERS: ${BV_MAX_CONCURRENT_CHUNK_TRANSFERS:-8}
       BV_ADMIN_TOKEN: ${BV_ADMIN_TOKEN:-}
       LOGGING_STRUCTURED_FORMAT_CONSOLE: logstash
@@ -125,6 +126,17 @@ services:
     ports: ["127.0.0.1:9103:9100"]
     volumes: ["node3-data:/var/lib/bytevault/node"]
 
+  node-4:
+    <<: *node
+    profiles: ["spare"]
+    environment:
+      <<: *node-env
+      BV_NODE_ID: node-4
+      BV_NODE_AUTH_SECRET: ${BV_NODE_4_SECRET:?set in .env}
+      BV_NODE_ADVERTISED_ENDPOINT: http://node-4:9100
+    ports: ["127.0.0.1:9104:9100"]
+    volumes: ["node4-data:/var/lib/bytevault/node"]
+
   prometheus:
     image: prom/prometheus:v3.4.1
     profiles: ["monitoring"]
@@ -148,3 +160,4 @@ volumes:
   node1-data:
   node2-data:
   node3-data:
+  node4-data:

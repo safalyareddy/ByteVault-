@@ -31,7 +31,15 @@ on the Compose stack:
 - bounded retries with jitter
 - DLQ
 - guarded, audited replay
-**Phase 5** (OFFLINE detection, repair engine, scrubber, drain) is next.
+**Phase 5:** **gate met** on 2026-11-04. All of these are covered by
+automated tests against 4 real node containers and were demonstrated live on
+the Compose stack:
+- OFFLINE detection
+- lease-based repair from verified sources
+- scrubbing
+- rejoin reconciliation
+- drain
+**Phase 6** (security hardening, then the operations dashboard) is next.
 
 ## Requirements
 
@@ -72,7 +80,17 @@ on the Compose stack:
 | P3-8 | Failure detector: HEALTHY → SUSPECT after `suspect-after` without a heartbeat; SUSPECT → HEALTHY on resume | Implemented | `backend/.../node/FailureDetector.java` | `mvn verify`; live pause | 2026-11-04 | IT: node-3 paused → SUSPECT → unpaused → HEALTHY (both audited). Live: node-2 SUSPECT after 16 s (threshold 15 s), HEALTHY on the next heartbeat after unpause |
 | P3-9 | Capacity-aware placement (chunk + configurable reserve), never silently fewer targets | Implemented | `backend/.../placement/PlacementPolicy.java` | `mvn test` | 2026-11-04 | `PlacementPolicyTest` 5/5, including the exact reserve boundary, non-HEALTHY exclusion and unsatisfiable placement. Capacity reflects the Docker VM disk (note 2) |
 | P3-10 | Node metrics: `bv_node_heartbeat_age_seconds`, `bv_node_state`, `bv_node_capacity_bytes`, `bv_node_usable_bytes`, `bv_heartbeats_rejected_total` | Implemented | `FailureDetector`, `HeartbeatController` | `curl :8090/actuator/prometheus` | 2026-11-04 | live: age 0, `bv_node_state{state="HEALTHY"}` = 1 for all 3 nodes |
-| P3-11 | OFFLINE transition + replica LOST marking | Not started | - | - | - | Phase 5 (the transition is allowed in the table but nothing triggers it yet) |
+| P3-11 | OFFLINE transition + replica LOST marking | Implemented | `FailureDetector`, `NodeLifecycleService.markOffline` | `mvn verify` (`SelfHealingIT`); live | 2026-11-04 | live: node-2 stopped → SUSPECT +14 s → OFFLINE +45 s, 13 replicas LOST, objects DEGRADED, all in one transaction |
+| P5-1 | Under-replication planner: one active job per chunk, reason classified, 10-min cool-off after ABANDONED | Implemented | `backend/.../repair/RepairPlanner.java` | `mvn verify` | 2026-11-04 | partial unique index + `ON CONFLICT DO NOTHING`; reasons NODE_OFFLINE/CORRUPTION/DRAIN asserted in IT |
+| P5-2 | Repair worker: CAS lease claim, verified source read, target write, target re-hash from disk, then transactional commit; no transaction across transfers; restartable | Implemented | `backend/.../repair/RepairWorker.java` | `mvn verify`; live | 2026-11-04 | IT: every repaired copy checked with `sha256sum` on the target disk. Live: 13 jobs, all COMMITTED on the first attempt, source ≠ target |
+| P5-3 | Old copies retired only after the replacement is VERIFIED and committed | Implemented | `ReplicationStatus.retireSuperseded` | `mvn verify` | 2026-11-04 | retire runs inside the commit transaction and only when active VERIFIED ≥ RF |
+| P5-4 | Bounded concurrency: global max (2) + one active job per target node | Implemented | `RepairWorker` | - | - | not load-tested |
+| P5-5 | No target available → job waits without burning attempts; RF never lowered | Implemented | `RepairWorker.waitForCapacity` | `mvn verify` | 2026-11-04 | 2 of 4 nodes paused → chunk repaired to 2 copies, then waits; object DEGRADED but downloadable; 0 ABANDONED; restored to 3 when the nodes return |
+| P5-6 | Checksum scrubber: least recently verified first, batch-limited, paced; admin "scrub now" (audited) | Implemented | `backend/.../repair/Scrubber.java`, `POST /api/v1/admin/scrub` | `mvn verify`; live | 2026-11-04 | live: 1 flipped byte → scrub 39 checked / 1 corrupt → repaired in place within 4 s; all 3 disks match metadata; download SHA-256 matches |
+| P5-7 | Rejoin reconciliation: LOST copies re-verified if still needed, else deleted; never > RF | Implemented | `backend/.../repair/RejoinReconciler.java` | `mvn verify`; live | 2026-11-04 | live: node-2 restarted → re-admitted in 13 s → 13 stale copies DELETED, 0 chunk files left on disk, 0 chunks over RF |
+| P5-8 | Graceful drain (admin, audited): no new placements, copies moved before removal, `safeToRemove`, cancel | Implemented | `backend/.../node/DrainController.java` | `mvn verify` | 2026-11-04 | IT: 401 without token; new uploads avoid the draining node; safeToRemove only after its copies are moved and deleted from its disk; object stays COMPLETE throughout. No degraded override in v1 |
+| P5-9 | Guarded fault-injection scripts | Implemented | `scripts/fault/` | live | 2026-11-04 | `stop-node.sh` refuses without `--yes` (observed); `corrupt-chunk.sh` refuses unless the object name starts with `disposable-` and the chunk ID is typed back (wrong answer → "Aborted; nothing changed", observed) |
+| P5-10 | Repair metrics: `bv_under_replicated_chunks`, `bv_repair_jobs_total{result}`, `bv_repair_duration_seconds`, `bv_repair_jobs_in_flight`, `bv_checksum_failures_total{path}`, `bv_scrub_replicas_checked_total` | Implemented | repair package | `mvn verify` (registry assertions) | 2026-11-04 | |
 | P2-10 | Outbox rows written in the same transaction as state changes | Implemented | `backend/.../outbox/OutboxWriter.java` | `mvn verify` | 2026-11-04 | refuses to run outside a transaction; rows published by P4-1 |
 | P4-1 | Outbox publisher: SKIP LOCKED claim, ordered send with aggregate key, acked-prefix marking, global backoff with jitter | Implemented | `backend/.../outbox/OutboxPublisher.java` | `mvn verify` (`KafkaReliabilityIT`) | 2026-11-04 | published_at set after the ack; outage test below. Live: 12 events left over from Phases 2–3 were published on deploy, and the projection matched the database |
 | P4-2 | Idempotent consumers: `processed_events` in the effect transaction, aggregate-version check | Implemented | `backend/.../events/IdempotentProcessor.java`, `ObjectStatsConsumer`, `TimelineConsumer` | `mvn verify` | 2026-11-04 | `duplicateDeliveryProducesOneLogicalEffect` (same message sent twice → +777 bytes once, 1 timeline row) |
@@ -105,6 +123,8 @@ on the Compose stack:
 | 2026-11-04 | `mvn -B -ntp verify` (Phase 2) | **58 tests, 0 failures, 0 skipped**: node-protocol 6, storage-node 19, backend unit 17, backend IT 16 (`FoundationIT` 8, `StorageIT` 8, with 3 real node containers) |
 | 2026-11-04 | `mvn -B -ntp verify` (Phase 3) | **71 tests, 0 failures, 0 skipped**: node-protocol 6, storage-node 21, backend unit 27, backend IT 17 (`StorageIT` 9 with 5 node containers, 2 of them deliberately misconfigured) |
 | 2026-11-04 | `mvn -B -ntp verify` (Phase 4) | **101 tests, 0 failures, 0 skipped**: node-protocol 6, storage-node 21, backend unit 49, backend IT 25 (`FoundationIT` 8, `StorageIT` 9, `KafkaReliabilityIT` 8) |
+| 2026-11-04 | `mvn -B -ntp verify` (Phase 5) | **114 tests, 0 failures, 0 skipped**: node-protocol 6, storage-node 22, backend unit 50, backend IT 30 (`FoundationIT` 8, `StorageIT` 9, `KafkaReliabilityIT` 8, `SelfHealingIT` 5 with 4 node containers) |
+| 2026-11-04 | live (`--profile spare`, 4 nodes): `fault/stop-node.sh node-2 --yes` → `start-node.sh node-2` → `fault/corrupt-chunk.sh` + admin scrub | OFFLINE at +45 s, all copies repaired onto node-4 by +53 s; rejoin deleted 13 stale copies; corruption repaired in place in 4 s; download SHA-256 `931a77c8…a3a1` unchanged throughout |
 | 2026-11-04 | live: `docker compose stop kafka`, upload 6 MB, `start kafka` | upload OK during the outage; backlog 4 → 0 within 4 s of restart; projection consistent; SHA-256 matches |
 | 2026-11-04 | live: `docker compose pause node-2`, upload, unpause, upload | SUSPECT after 16 s; upload refused with 503 `INSUFFICIENT_HEALTHY_NODES`; HEALTHY on resume; next 1 MB upload round-trips with matching SHA-256 |
 | 2026-11-04 | live stack: `scripts/bv.sh upload` of a 25 MiB random file → `download` → `shasum -a 256` | 7 chunks, each VERIFIED on node-1/2/3; downloaded sha256 `044abd8d…5aa8` equals the original; re-running the upload replays the same object (1 row in `objects`) |
@@ -137,6 +157,13 @@ on the Compose stack:
      (HTTP 500 on node GET). The node now returns a `Resource`.
    - (b) The CLI didn't recognise an idempotent replay of an already-completed
      upload.
+   - (c) Phase 5: a race between two repairs of different chunks of the same
+     object, each committing at the same moment. Neither saw the other's
+     commit, so the object stayed DEGRADED even though every chunk was
+     healthy. `SelfHealingIT` caught it. The fix is to lock the object row
+     before recomputing its status, plus a periodic safety sweep, which never
+     fired once the lock was in place.
+   - (d) `scripts/up.sh` passed `--profile` after `up`, which Compose rejects.
 5. Docker Desktop hung twice during the session, the second time after disk
    space ran low. Each time a force-restart restored it; no code changes were
    needed.

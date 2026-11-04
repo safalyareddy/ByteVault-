@@ -125,6 +125,39 @@ public class NodeClient {
         }
     }
 
+    public record VerifyResult(FetchStatus status, String actualSha256, long sizeBytes, String error) {
+        /** True only if the node read the bytes back and they match what metadata expects. */
+        public boolean matches(String expectedSha256, long expectedSize) {
+            return status == FetchStatus.OK && expectedSha256.equals(actualSha256) && sizeBytes == expectedSize;
+        }
+    }
+
+    /**
+     * Asks a node to re-hash a chunk from disk (scrubber, repair target check, reconciliation).
+     * Status OK means the node answered; the caller compares the hash with metadata.
+     */
+    public VerifyResult verifyChunk(String nodeId, UUID chunkId) {
+        try {
+            HttpRequest req = signed(nodeId, "POST", NodeProtocol.verifyPath(chunkId), NodeProtocol.NO_BODY)
+                    .POST(HttpRequest.BodyPublishers.noBody()).build();
+            HttpResponse<byte[]> res = http.send(req, HttpResponse.BodyHandlers.ofByteArray());
+            if (res.statusCode() == 404) {
+                return new VerifyResult(FetchStatus.MISSING, null, 0, "chunk not found on node");
+            }
+            if (res.statusCode() != 200) {
+                return new VerifyResult(FetchStatus.UNAVAILABLE, null, 0, "HTTP " + res.statusCode());
+            }
+            var body = json.readTree(res.body());
+            return new VerifyResult(FetchStatus.OK, body.path("actualSha256").asText(), body.path("sizeBytes").asLong(),
+                    null);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return new VerifyResult(FetchStatus.UNAVAILABLE, null, 0, "interrupted");
+        } catch (IOException e) {
+            return new VerifyResult(FetchStatus.UNAVAILABLE, null, 0, e.getClass().getSimpleName() + ": " + e.getMessage());
+        }
+    }
+
     public enum ProbeResult { AUTHENTICATED, REJECTED, UNREACHABLE }
 
     /**

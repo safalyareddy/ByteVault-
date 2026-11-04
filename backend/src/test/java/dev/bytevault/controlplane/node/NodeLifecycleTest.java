@@ -54,6 +54,16 @@ class NodeLifecycleTest {
     }
 
     @Test
+    void onlyLongSilentSuspectNodesGoOffline() {
+        Duration offline = Duration.ofSeconds(45);
+        assertThat(NodeLifecycle.shouldMarkOffline(NodeState.SUSPECT, Duration.ofSeconds(46), offline)).isTrue();
+        assertThat(NodeLifecycle.shouldMarkOffline(NodeState.SUSPECT, Duration.ofSeconds(45), offline)).isFalse();
+        assertThat(NodeLifecycle.shouldMarkOffline(NodeState.HEALTHY, Duration.ofHours(1), offline))
+                .as("HEALTHY must pass through SUSPECT first").isFalse();
+        assertThat(NodeLifecycle.shouldMarkOffline(NodeState.DRAINING, Duration.ofHours(1), offline)).isFalse();
+    }
+
+    @Test
     void onlySilentHealthyNodesBecomeSuspect() {
         Duration suspect = Duration.ofSeconds(15);
         assertThat(NodeLifecycle.shouldSuspect(NodeState.HEALTHY, Duration.ofSeconds(16), suspect)).isTrue();

@@ -6,13 +6,14 @@ across independent storage-node processes. PostgreSQL holds the authoritative
 metadata, Kafka carries domain events through a transactional outbox, and the
 system detects failures and repairs from verified replicas.
 
-> **Status:** Phases 0–4 are done. Chunked upload and
+> **Status:** Phases 0–5 are done. Chunked upload and
 > download work, with 3 checksum-verified replicas on distinct nodes, signed node
 > heartbeats with admission and failure detection,
 > read-path corruption detection, asynchronous delete, and Kafka events through
 > a transactional outbox with idempotent consumers, a DLQ and guarded replay.
-> Automatic repair, the scrubber, authentication and the dashboard are **not
-> implemented yet**.
+> Self-healing works: OFFLINE detection, repair from verified replicas, a
+> checksum scrubber, rejoin reconciliation and drain. Authentication and the
+> dashboard are **not implemented yet**.
 > The exact state, with test evidence, is in
 > [docs/implementation-status.md](docs/implementation-status.md).
 
@@ -57,8 +58,18 @@ scripts/down.sh           # stops containers, KEEPS all data volumes
 scripts/reset-volumes.sh  # DESTRUCTIVE: deletes metadata, Kafka log and chunk data (asks for confirmation)
 ```
 
-Optional monitoring (Prometheus on :9090, Grafana on :3001):
-`scripts/up.sh --profile monitoring`.
+Optional profiles: `scripts/up.sh --profile spare` adds node-4, so a lost
+node's copies have somewhere to go. With only 3 nodes and RF=3, repair waits
+for capacity. `--profile monitoring` adds Prometheus (:9090) and Grafana
+(:3001).
+
+Fault injection, all guarded (see `scripts/fault/`):
+
+```bash
+scripts/fault/stop-node.sh node-2 --yes     # then scripts/fault/start-node.sh node-2
+scripts/fault/corrupt-chunk.sh <objectId> <chunkIndex> node-1   # disposable-* objects only
+scripts/fault/pause-kafka.sh stop           # then: start
+```
 
 ## Ports (all bound to 127.0.0.1)
 

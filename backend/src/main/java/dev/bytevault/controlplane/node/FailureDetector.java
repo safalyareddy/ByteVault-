@@ -14,7 +14,7 @@ import org.springframework.stereotype.Component;
 /**
  * Heartbeat-age failure detector (ADR-0010): a HEALTHY node silent for longer than
  * {@code suspect-after} becomes SUSPECT. Also publishes per-node gauges from the same reading.
- * OFFLINE detection, which marks replicas LOST, is Phase 5.
+ * A SUSPECT node silent for longer than {@code offline-after} becomes OFFLINE (replicas LOST).
  */
 @Component
 public class FailureDetector {
@@ -22,6 +22,7 @@ public class FailureDetector {
     private final NodeRepository nodes;
     private final NodeLifecycleService lifecycle;
     private final Duration suspectAfter;
+    private final Duration offlineAfter;
     private final MeterRegistry meters;
     private final Map<String, NodeGauges> gauges = new ConcurrentHashMap<>();
 
@@ -30,6 +31,7 @@ public class FailureDetector {
         this.nodes = nodes;
         this.lifecycle = lifecycle;
         this.suspectAfter = props.suspectAfter();
+        this.offlineAfter = props.offlineAfter();
         this.meters = meters;
     }
 
@@ -41,6 +43,9 @@ public class FailureDetector {
             gauges.computeIfAbsent(row.id(), this::register).update(row, age);
             if (NodeLifecycle.shouldSuspect(row.state(), age, suspectAfter)) {
                 lifecycle.transition(row, NodeState.SUSPECT,
+                        age == null ? "no heartbeat recorded" : "no heartbeat for " + age.toSeconds() + "s");
+            } else if (NodeLifecycle.shouldMarkOffline(row.state(), age, offlineAfter)) {
+                lifecycle.markOffline(row,
                         age == null ? "no heartbeat recorded" : "no heartbeat for " + age.toSeconds() + "s");
             }
         }

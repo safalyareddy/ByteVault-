@@ -26,11 +26,17 @@ public class NodeLifecycleService {
     private final AuditWriter audit;
     private final TransactionTemplate tx;
     private final int admissionHeartbeats;
+    private final org.springframework.jdbc.core.simple.JdbcClient jdbc;
+    private final dev.bytevault.controlplane.repair.ReplicationStatus replicationStatus;
     /** Consecutive UP heartbeats per node; in memory by design (ADR-0010). */
     private final Map<String, Integer> upStreak = new ConcurrentHashMap<>();
 
     public NodeLifecycleService(NodeRepository nodes, NodeClient nodeClient, OutboxWriter outbox, AuditWriter audit,
-                                TransactionTemplate tx, ClusterProperties cluster) {
+                                TransactionTemplate tx, ClusterProperties cluster,
+                                org.springframework.jdbc.core.simple.JdbcClient jdbc,
+                                dev.bytevault.controlplane.repair.ReplicationStatus replicationStatus) {
+        this.jdbc = jdbc;
+        this.replicationStatus = replicationStatus;
         this.nodes = nodes;
         this.nodeClient = nodeClient;
         this.outbox = outbox;
@@ -67,6 +73,49 @@ public class NodeLifecycleService {
         return nodes.find(id).orElseThrow().state();
     }
 
+    /**
+     * SUSPECT -> OFFLINE (Phase 5). In the same transaction every VERIFIED replica on the node
+     * becomes LOST, affected chunks UNDER_REPLICATED and their objects DEGRADED, so the repair
+     * planner sees the deficit immediately. Bytes on the node are not touched: if it returns, the
+     * reconciler re-verifies them.
+     */
+    public boolean markOffline(NodeRepository.NodeRow row, String reason) {
+        NodeLifecycle.requireAllowed(row.state(), NodeState.OFFLINE);
+        Integer lost = tx.execute(status -> {
+            if (!nodes.transition(row.id(), row.state(), NodeState.OFFLINE)) {
+                return null;
+            }
+            record Lost(java.util.UUID chunkId, java.util.UUID objectId) {}
+            java.util.List<Lost> replicas = jdbc.sql("""
+                    UPDATE chunk_replicas r SET state = 'LOST', last_error = 'node offline', updated_at = now(),
+                           version = r.version + 1
+                      FROM chunks c
+                     WHERE c.id = r.chunk_id AND r.node_id = :n AND r.state = 'VERIFIED'
+                    RETURNING r.chunk_id, c.object_id
+                    """).param("n", row.id()).query(Lost.class).list();
+            for (Lost l : replicas) {
+                outbox.append("REPLICA", l.chunkId() + "@" + row.id(), row.version() + 1, "ReplicaLost",
+                        Topics.REPLICATION_EVENTS, l.chunkId().toString(),
+                        Map.of("chunkId", l.chunkId(), "objectId", l.objectId(), "nodeId", row.id(),
+                                "detail", "node offline"));
+                replicationStatus.refresh(l.chunkId());
+            }
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("nodeId", row.id());
+            payload.put("from", row.state().name());
+            payload.put("to", NodeState.OFFLINE.name());
+            payload.put("reason", reason);
+            payload.put("replicasLost", replicas.size());
+            outbox.append("NODE", row.id(), row.version() + 1, "NodeStateChanged", Topics.NODE_EVENTS, row.id(), payload);
+            audit.record(AuditWriter.SYSTEM, "NODE_STATE_CHANGED", "NODE", row.id(), payload);
+            return replicas.size();
+        });
+        if (lost != null) {
+            log.warn("Node {} SUSPECT -> OFFLINE ({}); {} replica(s) marked LOST", row.id(), reason, lost);
+        }
+        return lost != null;
+    }
+
     private void admit(NodeRepository.NodeRow row, int streak) {
         NodeClient.ProbeResult probe = nodeClient.admissionProbe(row.id());
         if (probe == NodeClient.ProbeResult.AUTHENTICATED) {
@@ -79,6 +128,10 @@ public class NodeLifecycleService {
 
     /** Audited compare-and-set transition. Returns false if another writer changed the state first. */
     public boolean transition(NodeRepository.NodeRow row, NodeState to, String reason) {
+        return transition(row, to, reason, AuditWriter.SYSTEM);
+    }
+
+    public boolean transition(NodeRepository.NodeRow row, NodeState to, String reason, String actor) {
         NodeLifecycle.requireAllowed(row.state(), to);
         Boolean changed = tx.execute(status -> {
             if (!nodes.transition(row.id(), row.state(), to)) {
@@ -91,7 +144,7 @@ public class NodeLifecycleService {
             payload.put("reason", reason);
             outbox.append("NODE", row.id(), row.version() + 1, "NodeStateChanged", Topics.NODE_EVENTS, row.id(),
                     payload);
-            audit.record(AuditWriter.SYSTEM, "NODE_STATE_CHANGED", "NODE", row.id(), payload);
+            audit.record(actor, "NODE_STATE_CHANGED", "NODE", row.id(), payload);
             return true;
         });
         if (Boolean.TRUE.equals(changed)) {

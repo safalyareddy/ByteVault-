@@ -15,10 +15,10 @@ factor 1, since there is one broker.
 |---|---|---|---|
 | `bytevault.object-events` | `objectId` | upload, object | `bv-timeline`, `bv-object-stats` |
 | `bytevault.chunk-events` | `objectId:chunkIndex` | upload, repair | `bv-timeline` |
-| `bytevault.node-events` | `nodeId` | node lifecycle, failure detector | `bv-timeline` (`bv-repair-planner` in Phase 5) |
-| `bytevault.replication-events` | `chunkId` | upload, download (corruption), scrubber | `bv-timeline` (`bv-repair-planner` in Phase 5) |
-| `bytevault.repair-commands` | `chunkId` | repair planner (Phase 5) | `bv-repair-worker` (Phase 5) |
-| `bytevault.repair-results` | `repairJobId` | repair worker (Phase 5) | `bv-timeline` |
+| `bytevault.node-events` | `nodeId` | node lifecycle, failure detector, drain | `bv-timeline` |
+| `bytevault.replication-events` | `chunkId` | download, scrubber, OFFLINE detection | `bv-timeline` |
+| `bytevault.repair-commands` | `chunkId` | repair planner (`RepairRequested`) | none (history only; workers claim jobs from PostgreSQL with leases, ADR-0007) |
+| `bytevault.repair-results` | `repairJobId` | repair worker (`RepairCommitted`/`RepairFailed`/`RepairAbandoned`) | `bv-timeline` |
 | `bytevault.storage-dlq` | original key | consumer error handler | `bv-dlq-recorder` → `dlq_events`, guarded replay |
 
 ### Consumer groups (implemented)
