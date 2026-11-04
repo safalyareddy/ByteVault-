@@ -31,6 +31,8 @@ public class ClusterProperties {
     @Min(1) @Max(64) private int maxConcurrentChunkTransfers = 8;
     @NotNull private Duration transferPermitWait = Duration.ofSeconds(30);
     @NotNull private Duration uploadSessionTtl = Duration.ofHours(24);
+    @Min(1) @Max(10) private int admissionHeartbeats = 2;
+    @Min(0) private long nodeFreeSpaceReserveBytes = 256L * 1024 * 1024;
     @NotNull private Path spoolDir = Path.of(System.getProperty("java.io.tmpdir"), "bytevault-spool");
 
     public record NodeConfig(String id, URI endpoint, RequestSigner signer) {
@@ -93,6 +95,10 @@ public class ClusterProperties {
     public void setTransferPermitWait(Duration v) { this.transferPermitWait = v; }
     public Duration getUploadSessionTtl() { return uploadSessionTtl; }
     public void setUploadSessionTtl(Duration v) { this.uploadSessionTtl = v; }
+    public int getAdmissionHeartbeats() { return admissionHeartbeats; }
+    public void setAdmissionHeartbeats(int v) { this.admissionHeartbeats = v; }
+    public long getNodeFreeSpaceReserveBytes() { return nodeFreeSpaceReserveBytes; }
+    public void setNodeFreeSpaceReserveBytes(long v) { this.nodeFreeSpaceReserveBytes = v; }
     public Path getSpoolDir() { return spoolDir; }
     public void setSpoolDir(Path v) { this.spoolDir = v; }
 

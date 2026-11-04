@@ -50,20 +50,6 @@ public class NodeClient {
         return nodes;
     }
 
-    public record NodeHealth(String nodeId, int protocolVersion, String status, boolean dataDirWritable,
-                             long capacityBytes, long usableBytes) {}
-
-    public NodeHealth health(String nodeId) throws IOException, InterruptedException {
-        NodeConfig node = node(nodeId);
-        HttpRequest req = HttpRequest.newBuilder(node.endpoint().resolve(NodeProtocol.HEALTH_PATH))
-                .timeout(Duration.ofSeconds(3)).GET().build();
-        HttpResponse<byte[]> res = http.send(req, HttpResponse.BodyHandlers.ofByteArray());
-        if (res.statusCode() != 200 && res.statusCode() != 503) {
-            throw new IOException("health returned HTTP " + res.statusCode());
-        }
-        return json.readValue(res.body(), NodeHealth.class);
-    }
-
     public record PutResult(boolean success, String sha256, String error) {}
 
     /** Uploads a spooled chunk. Success requires the node's echoed checksum to equal ours. */
@@ -136,6 +122,26 @@ public class NodeClient {
             return new FetchResult(FetchStatus.UNAVAILABLE, null, "interrupted");
         } catch (IOException e) {
             return new FetchResult(FetchStatus.UNAVAILABLE, null, e.getClass().getSimpleName() + ": " + e.getMessage());
+        }
+    }
+
+    public enum ProbeResult { AUTHENTICATED, REJECTED, UNREACHABLE }
+
+    /**
+     * Admission probe (ADR-0010): a signed GET of a chunk ID that is never allocated. A 404 proves
+     * the configured endpoint is reachable and that both sides hold the same secret.
+     */
+    public ProbeResult admissionProbe(String nodeId) {
+        try {
+            HttpRequest req = signed(nodeId, "GET", NodeProtocol.chunkPath(NodeProtocol.PROBE_CHUNK_ID),
+                    NodeProtocol.NO_BODY).timeout(Duration.ofSeconds(2)).GET().build();
+            int status = http.send(req, HttpResponse.BodyHandlers.discarding()).statusCode();
+            return status == 404 ? ProbeResult.AUTHENTICATED : ProbeResult.REJECTED;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return ProbeResult.UNREACHABLE;
+        } catch (IOException e) {
+            return ProbeResult.UNREACHABLE;
         }
     }
 

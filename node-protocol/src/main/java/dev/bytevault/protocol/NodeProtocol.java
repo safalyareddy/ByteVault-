@@ -26,6 +26,13 @@ public final class NodeProtocol {
 
     private NodeProtocol() {}
 
+    /** Chunk ID that is never allocated; used by the admission probe, which expects 404. */
+    public static final UUID PROBE_CHUNK_ID = new UUID(0L, 0L);
+
+    public static String heartbeatPath(String nodeId) {
+        return PREFIX + "/nodes/" + nodeId + "/heartbeat";
+    }
+
     public static String chunkPath(UUID chunkId) {
         return CHUNKS_PATH + "/" + chunkId;
     }

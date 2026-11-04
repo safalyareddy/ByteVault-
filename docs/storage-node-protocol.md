@@ -74,10 +74,27 @@ Idempotent: `204` whether the chunk existed or not.
 
 Pages through stored chunk IDs, for reconciliation after a metadata restore.
 
-### Heartbeat: `POST {controlPlane}/internal/v1/nodes/{nodeId}/heartbeat` (Phase 3)
+### Heartbeat: `POST {controlPlane}/internal/v1/nodes/{nodeId}/heartbeat` (node → control plane)
 
-Sent by the node every `BV_HEARTBEAT_INTERVAL`:
-`{nodeId, protocolVersion, endpoint, capacityBytes, usedBytes, usableBytes, status}`.
+Sent every `BV_HEARTBEAT_INTERVAL` and signed with the node's own secret. Here
+`X-BV-Node-Id` is the sending node, and `X-BV-Content-SHA256` is the SHA-256 of
+the exact JSON body bytes.
+
+```json
+{"nodeId":"node-1","protocolVersion":1,"advertisedEndpoint":"http://node-1:9100",
+ "status":"UP","dataDirWritable":true,"capacityBytes":240120725504,"usableBytes":216475791360,
+ "sentAt":"2026-11-04T14:20:00Z"}
+```
+
+Responses:
+- `200 {"nodeId","state"}`: the node's state as the control plane now
+  records it.
+- `401`: an unknown node, a bad signature, an expired timestamp, mismatched
+  node IDs, or a body that doesn't match its declared checksum.
+- `400`: malformed JSON.
+
+The admission policy and the failure detector are described in
+[ADR-0010](adr/0010-push-heartbeats-and-admission.md).
 
 ## Filesystem safety
 

@@ -61,6 +61,8 @@ bytevault:
     node-request-timeout: ${BV_NODE_REQUEST_TIMEOUT:30s}
     max-concurrent-chunk-transfers: ${BV_MAX_CONCURRENT_CHUNK_TRANSFERS:8}
     upload-session-ttl: ${BV_UPLOAD_SESSION_TTL:24h}
+    admission-heartbeats: ${BV_ADMISSION_HEARTBEATS:2}
+    node-free-space-reserve-bytes: ${BV_NODE_FREE_SPACE_RESERVE_BYTES:268435456}
   kafka:
     topic-partitions: ${BV_KAFKA_TOPIC_PARTITIONS:3}
     topic-replication-factor: ${BV_KAFKA_TOPIC_REPLICATION:1}

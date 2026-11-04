@@ -13,7 +13,7 @@ retry).
 
 | # | Threat (STRIDE) | Mitigation | Phase | Status |
 |---|---|---|---|---|
-| T1 | Spoofed storage node sends fake heartbeats or receives chunks (S) | Per-node HMAC secrets, node-ID binding, ±60 s timestamp window | 2–3 | Implemented (control plane → node); node → control plane heartbeats are Phase 3–5 |
+| T1 | Spoofed storage node sends fake heartbeats or receives chunks (S) | Per-node HMAC secrets, node-ID binding, ±60 s timestamp window | 2–3 | Implemented both ways: control plane → node requests and node → control plane heartbeats (body hash signed; admission probe proves both sides share the secret) |
 | T2 | Attacker on the network tampers with chunk bytes (T) | The declared SHA-256 is signed and the node verifies the body before ack; the control plane re-verifies on read | 2 | Implemented |
 | T3 | Bit rot or manual corruption on disk (T) | Periodic scrubber, read-path verification, repair from a verified replica | 5 | Read-path verification implemented; scrubber and repair planned |
 | T4 | Path traversal through a filename or chunk ID (T/E) | Only server-generated UUID paths, canonical UUID validation, normalised containment check, symlink rejection | 2 | Implemented |

@@ -35,6 +35,8 @@ class ChunkControllerTest {
 
     @DynamicPropertySource
     static void nodeProps(DynamicPropertyRegistry r) {
+        // Port 1 is never listening: heartbeats fail fast instead of reaching a real control plane.
+        r.add("bytevault.node.control-plane-url", () -> "http://127.0.0.1:1");
         r.add("bytevault.node.id", () -> NODE);
         r.add("bytevault.node.data-dir", () -> dataDir.toString());
         r.add("bytevault.node.auth-secret", () -> SECRET);

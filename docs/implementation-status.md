@@ -16,11 +16,14 @@ integration tests against real PostgreSQL and Kafka.
 **Phase 2:** **gate met** on 2026-11-04. An end-to-end upload and download is
 byte-for-byte identical, both in the automated `StorageIT` against 3 real node
 containers and with a 25 MiB file on the live Compose stack.
-**Phase 3:** **partial.** Rendezvous placement, three independent nodes, RF=3
-with every replica verified, a node inventory API, and pull-based
-HEALTHY/SUSPECT detection are done and tested. Still open: node-pushed signed
-heartbeats, the JOINING admission policy, and a placement test that is
-capacity-aware.
+**Phase 3:** **gate met** on 2026-11-04. All of these are covered by
+automated tests, and a live run on the Compose stack confirmed them:
+- signed push heartbeats
+- JOINING admission with an authenticated probe
+- a heartbeat-age failure detector
+- capacity-aware rendezvous placement
+- RF=3 with every replica verified on distinct nodes
+**Phase 4** (Kafka outbox publisher, consumers, retries, DLQ) is next.
 
 ## Requirements
 
@@ -54,9 +57,14 @@ capacity-aware.
 | P3-1 | Deterministic rendezvous placement, distinct nodes | Implemented | `backend/.../placement/RendezvousPlacement.java` | `mvn test` | 2026-11-04 | 5/5, including expected values computed independently in Python, minimal movement when a node is removed, and even spread |
 | P3-2 | RF=3 with all replicas VERIFIED before COMPLETE (ADR-0005) | Implemented | `UploadService` | `mvn verify` (`StorageIT`) | 2026-11-04 | each chunk on node-1/2/3, checksum confirmed with `sha256sum` on each node's own disk |
 | P3-3 | Insufficient healthy nodes never yield COMPLETE | Implemented | `UploadService`, `NodeProbe` | `mvn verify` (`StorageIT` order 7) | 2026-11-04 | node-3 paused → SUSPECT (audited) → chunk PUT 503 `INSUFFICIENT_HEALTHY_NODES` → complete 409 |
-| P3-4 | Node inventory API with real probe data | Implemented | `backend/.../node/NodeController.java` | `mvn verify`; `scripts/bv.sh nodes` | 2026-11-04 | heartbeat age 0–5 s; no secrets in the response |
-| P3-5 | Node lifecycle: pull-based JOINING→HEALTHY, HEALTHY→SUSPECT, SUSPECT→HEALTHY | Partial | `backend/.../node/NodeProbe.java` | `mvn verify` | 2026-11-04 | OFFLINE (which marks replicas LOST) is deliberately left to Phase 5; nodes don't push signed heartbeats yet |
-| P3-6 | Capacity-aware placement | Partial | `UploadService` (256 MiB free-space reserve) | - | - | no test yet; node capacity reflects the Docker VM disk (see note 2) |
+| P3-4 | Node inventory API with real heartbeat data | Implemented | `backend/.../node/NodeController.java` | `mvn verify`; `scripts/bv.sh nodes` | 2026-11-04 | heartbeat age 0–3 s; no secrets in the response |
+| P3-5 | Signed push heartbeats; body hash signed; unknown/forged/tampered/cross-node replays → 401 | Implemented | `storage-node/.../heartbeat/HeartbeatSender.java`, `backend/.../node/HeartbeatController.java` | `mvn verify` | 2026-11-04 | `HeartbeatSenderTest` 2/2; `StorageIT.forgedOrTamperedHeartbeatsAreRejected` (unsigned, wrong secret, altered body, node-1 signature on node-2 path) |
+| P3-6 | Admission: N consecutive UP heartbeats + signed probe of the configured endpoint (ADR-0010) | Implemented | `NodeLifecycleService`, `NodeClient.admissionProbe` | `mvn verify` | 2026-11-04 | node-4 (wrong secret) is never registered; node-5 (valid secret, unreachable endpoint) stays JOINING; 0 admissions audited for either |
+| P3-7 | Node lifecycle rules enforced in code; invalid transitions rejected | Implemented | `backend/.../node/NodeLifecycle.java`, `NodeRepository.transition` | `mvn test` | 2026-11-04 | `NodeLifecycleTest` 5/5 checks the full 5×5 transition table against the doc |
+| P3-8 | Failure detector: HEALTHY → SUSPECT after `suspect-after` without a heartbeat; SUSPECT → HEALTHY on resume | Implemented | `backend/.../node/FailureDetector.java` | `mvn verify`; live pause | 2026-11-04 | IT: node-3 paused → SUSPECT → unpaused → HEALTHY (both audited). Live: node-2 SUSPECT after 16 s (threshold 15 s), HEALTHY on the next heartbeat after unpause |
+| P3-9 | Capacity-aware placement (chunk + configurable reserve), never silently fewer targets | Implemented | `backend/.../placement/PlacementPolicy.java` | `mvn test` | 2026-11-04 | `PlacementPolicyTest` 5/5, including the exact reserve boundary, non-HEALTHY exclusion and unsatisfiable placement. Capacity reflects the Docker VM disk (note 2) |
+| P3-10 | Node metrics: `bv_node_heartbeat_age_seconds`, `bv_node_state`, `bv_node_capacity_bytes`, `bv_node_usable_bytes`, `bv_heartbeats_rejected_total` | Implemented | `FailureDetector`, `HeartbeatController` | `curl :8090/actuator/prometheus` | 2026-11-04 | live: age 0, `bv_node_state{state="HEALTHY"}` = 1 for all 3 nodes |
+| P3-11 | OFFLINE transition + replica LOST marking | Not started | - | - | - | Phase 5 (the transition is allowed in the table but nothing triggers it yet) |
 | P2-10 | Outbox rows written in the same transaction as state changes | Partial | `backend/.../outbox/OutboxWriter.java` | live DB query | 2026-11-04 | rows are recorded (refuses to run outside a transaction); **not published**, since the publisher is Phase 4 |
 | P4-* | Outbox, consumers, retries, DLQ, replay | Not started | | | | |
 | P5-* | Heartbeats, failure detection, repair, scrubber, drain | Not started | | | | |
@@ -76,6 +84,8 @@ capacity-aware.
 | 2026-11-04 | manual: stop Kafka, restart Kafka, stop backend | health went 503/kafka DOWN, then UP again about 2 s after restart; console showed degraded, then offline |
 | 2026-11-04 | scan of every container log for the 4 values in `.env` | 0 occurrences |
 | 2026-11-04 | `mvn -B -ntp verify` (Phase 2) | **58 tests, 0 failures, 0 skipped**: node-protocol 6, storage-node 19, backend unit 17, backend IT 16 (`FoundationIT` 8, `StorageIT` 8, with 3 real node containers) |
+| 2026-11-04 | `mvn -B -ntp verify` (Phase 3) | **71 tests, 0 failures, 0 skipped**: node-protocol 6, storage-node 21, backend unit 27, backend IT 17 (`StorageIT` 9 with 5 node containers, 2 of them deliberately misconfigured) |
+| 2026-11-04 | live: `docker compose pause node-2`, upload, unpause, upload | SUSPECT after 16 s; upload refused with 503 `INSUFFICIENT_HEALTHY_NODES`; HEALTHY on resume; next 1 MB upload round-trips with matching SHA-256 |
 | 2026-11-04 | live stack: `scripts/bv.sh upload` of a 25 MiB random file → `download` → `shasum -a 256` | 7 chunks, each VERIFIED on node-1/2/3; downloaded sha256 `044abd8d…5aa8` equals the original; re-running the upload replays the same object (1 row in `objects`) |
 
 ## Notes
@@ -106,5 +116,8 @@ capacity-aware.
      (HTTP 500 on node GET). The node now returns a `Resource`.
    - (b) The CLI didn't recognise an idempotent replay of an already-completed
      upload.
-5. The public API is unauthenticated until Phase 6. Every request acts as
+5. Docker Desktop hung twice during the session, the second time after disk
+   space ran low. Each time a force-restart restored it; no code changes were
+   needed.
+6. The public API is unauthenticated until Phase 6. Every request acts as
    owner `local-dev`, and the API is bound to 127.0.0.1 only.

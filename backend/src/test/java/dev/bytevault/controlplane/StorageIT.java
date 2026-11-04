@@ -48,40 +48,60 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * storage-node before backend, so {@code mvn verify} from the root satisfies this.
  */
 @Testcontainers(disabledWithoutDocker = true)
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.DEFINED_PORT, properties = {
         "spring.datasource.password=test",
         "bytevault.chunk-size-bytes=1048576",
         "bytevault.heartbeat-interval=1s",
         "bytevault.suspect-after=3s",
         "bytevault.offline-after=6s",
         "bytevault.deletion-interval=1s",
-        "bytevault.cluster.node-request-timeout=10s"})
+        "bytevault.cluster.node-request-timeout=10s",
+        "bytevault.cluster.admission-heartbeats=2",
+        "bytevault.failure-detector-interval=500ms"})
 @Import(ContainersConfig.class)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class StorageIT {
 
     static final int CHUNK = 1024 * 1024;
     static final String DATA_DIR = "/var/lib/bytevault/node";
-    static final Map<String, String> SECRETS = Map.of(
-            "node-1", "1".repeat(48), "node-2", "2".repeat(48), "node-3", "3".repeat(48));
+    /** Secrets the control plane is configured with. */
+    static final Map<String, String> SECRETS = Map.of("node-1", "1".repeat(48), "node-2", "2".repeat(48),
+            "node-3", "3".repeat(48), "node-4", "4".repeat(48), "node-5", "5".repeat(48));
+    /** node-4 runs with a different secret than configured: its heartbeats must be rejected. */
+    static final String NODE_4_ACTUAL_SECRET = "x".repeat(48);
+    static final List<String> GOOD_NODES = List.of("node-1", "node-2", "node-3");
     static final Map<String, GenericContainer<?>> NODES = new LinkedHashMap<>();
+    static final Map<String, GenericContainer<?>> MISCONFIGURED = new LinkedHashMap<>();
+    static final int CONTROL_PLANE_PORT = freePort();
 
     static {
         if (DockerClientFactory.instance().isDockerAvailable()) {
+            // Nodes push heartbeats to this JVM's control plane through the Testcontainers host tunnel.
+            org.testcontainers.Testcontainers.exposeHostPorts(CONTROL_PLANE_PORT);
             ImageFromDockerfile image = new ImageFromDockerfile("bytevault-storage-node-it", false)
                     .withFileFromPath("Dockerfile", Path.of("../storage-node/Dockerfile"))
                     .withFileFromPath("target/bytevault-storage-node.jar",
                             Path.of("../storage-node/target/bytevault-storage-node.jar"));
-            for (String id : List.of("node-1", "node-2", "node-3")) {
+            for (String id : List.of("node-1", "node-2", "node-3", "node-4", "node-5")) {
                 GenericContainer<?> c = new GenericContainer<>(image)
                         .withEnv("BV_NODE_ID", id)
-                        .withEnv("BV_NODE_AUTH_SECRET", SECRETS.get(id))
+                        .withEnv("BV_NODE_AUTH_SECRET", id.equals("node-4") ? NODE_4_ACTUAL_SECRET : SECRETS.get(id))
+                        .withEnv("BV_CONTROL_PLANE_URL", "http://host.testcontainers.internal:" + CONTROL_PLANE_PORT)
+                        .withEnv("BV_HEARTBEAT_INTERVAL", "1s")
                         .withExposedPorts(9100)
                         .waitingFor(Wait.forHttp("/internal/v1/health").forStatusCode(200)
                                 .withStartupTimeout(Duration.ofSeconds(90)));
                 c.start();
-                NODES.put(id, c);
+                (GOOD_NODES.contains(id) ? NODES : MISCONFIGURED).put(id, c);
             }
+        }
+    }
+
+    static int freePort() {
+        try (java.net.ServerSocket socket = new java.net.ServerSocket(0)) {
+            return socket.getLocalPort();
+        } catch (java.io.IOException e) {
+            throw new IllegalStateException(e);
         }
     }
 
@@ -94,6 +114,14 @@ class StorageIT {
                     .append(c.getHost()).append(':').append(c.getMappedPort(9100));
             secrets.append(secrets.isEmpty() ? "" : ",").append(id).append(':').append(SECRETS.get(id));
         });
+        // node-4: real endpoint, wrong secret. node-5: right secret, endpoint nothing listens on.
+        GenericContainer<?> node4 = MISCONFIGURED.get("node-4");
+        if (node4 != null) {
+            nodes.append(",node-4=http://").append(node4.getHost()).append(':').append(node4.getMappedPort(9100));
+            nodes.append(",node-5=http://127.0.0.1:1");
+            secrets.append(",node-4:").append(SECRETS.get("node-4")).append(",node-5:").append(SECRETS.get("node-5"));
+        }
+        r.add("server.port", () -> CONTROL_PLANE_PORT);
         r.add("bytevault.cluster.nodes", nodes::toString);
         r.add("bytevault.cluster.node-secrets", secrets::toString);
     }
@@ -111,7 +139,7 @@ class StorageIT {
     }
 
     void awaitHealthyNodes(int count) {
-        await("nodes HEALTHY", Duration.ofSeconds(30), () -> {
+        await("nodes HEALTHY", Duration.ofSeconds(45), () -> {
             Integer healthy = jdbc.queryForObject("SELECT count(*) FROM storage_nodes WHERE state = 'HEALTHY'", Integer.class);
             return healthy != null && healthy >= count;
         });
@@ -397,19 +425,75 @@ class StorageIT {
             docker.unpauseContainerCmd(node3).exec();
         }
         awaitHealthyNodes(3);
+        Integer recovered = jdbc.queryForObject("SELECT count(*) FROM audit_events WHERE resource_id = 'node-3' "
+                + "AND details->>'from' = 'SUSPECT' AND details->>'to' = 'HEALTHY'", Integer.class);
+        assertThat(recovered).as("SUSPECT -> HEALTHY on resumed heartbeats").isGreaterThanOrEqualTo(1);
     }
 
     @Test
     @Order(8)
-    void nodeInventoryReportsRealProbeData() {
+    void nodeInventoryReportsHeartbeatDataAndAdmissionPolicyHolds() {
         awaitHealthyNodes(3);
         JsonNode nodes = http.getForEntity("/api/v1/nodes", JsonNode.class).getBody();
-        assertThat(nodes).hasSize(3);
-        for (JsonNode n : nodes) {
+        Map<String, JsonNode> byId = new LinkedHashMap<>();
+        nodes.forEach(n -> byId.put(n.get("id").asText(), n));
+
+        for (String id : GOOD_NODES) {
+            JsonNode n = byId.get(id);
             assertThat(n.get("state").asText()).isEqualTo("HEALTHY");
             assertThat(n.get("capacityBytes").asLong()).isPositive();
-            assertThat(n.get("heartbeatAgeSeconds").asLong()).isBetween(0L, 5L);
-            assertThat(n.toString()).doesNotContain(SECRETS.get(n.get("id").asText()));
+            assertThat(n.get("heartbeatAgeSeconds").asLong()).isBetween(0L, 3L);
+            assertThat(n.toString()).doesNotContain(SECRETS.get(id));
         }
+        // Wrong secret: every heartbeat is rejected, so the node is never even registered.
+        assertThat(byId).doesNotContainKey("node-4");
+        // Valid heartbeats but the configured endpoint is unreachable: registered, never admitted.
+        assertThat(byId.get("node-5").get("state").asText()).isEqualTo("JOINING");
+        Integer admitted = jdbc.queryForObject("SELECT count(*) FROM audit_events WHERE resource_id IN ('node-4', 'node-5') "
+                + "AND details->>'to' = 'HEALTHY'", Integer.class);
+        assertThat(admitted).isZero();
+    }
+
+    @Test
+    @Order(9)
+    void forgedOrTamperedHeartbeatsAreRejected() throws Exception {
+        String path = "/internal/v1/nodes/node-1/heartbeat";
+        byte[] body = json.writeValueAsBytes(new dev.bytevault.protocol.Heartbeat("node-1", 1, "http://evil:9100",
+                "UP", true, 1, 1, Instant.now()));
+
+        // No signature at all.
+        HttpHeaders unsigned = new HttpHeaders();
+        unsigned.setContentType(MediaType.APPLICATION_JSON);
+        assertThat(http.exchange(path, HttpMethod.POST, new HttpEntity<>(body, unsigned), JsonNode.class)
+                .getStatusCode().value()).isEqualTo(401);
+
+        // Signed with the wrong secret.
+        assertThat(postSigned(path, body, new dev.bytevault.protocol.RequestSigner("w".repeat(48)), "node-1",
+                Sha256.of(body))).isEqualTo(401);
+
+        // Correctly signed hash, but the body was altered afterwards.
+        var signer = new dev.bytevault.protocol.RequestSigner(SECRETS.get("node-1"));
+        byte[] tampered = new String(body).replace("\"UP\"", "\"DOWN\"").getBytes();
+        assertThat(postSigned(path, tampered, signer, "node-1", Sha256.of(body))).isEqualTo(401);
+
+        // node-1's valid signature replayed against node-2's path.
+        assertThat(postSigned("/internal/v1/nodes/node-2/heartbeat", body, signer, "node-1", Sha256.of(body)))
+                .isEqualTo(401);
+
+        // None of this disturbed node-1.
+        assertThat(jdbc.queryForObject("SELECT state FROM storage_nodes WHERE id = 'node-1'", String.class))
+                .isEqualTo("HEALTHY");
+    }
+
+    int postSigned(String path, byte[] body, dev.bytevault.protocol.RequestSigner signer, String nodeId, String sha) {
+        var h = signer.sign("POST", path, nodeId, sha);
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.set("X-BV-Node-Id", h.nodeId());
+        headers.set("X-BV-Timestamp", h.timestamp());
+        headers.set("X-BV-Content-SHA256", h.contentSha256());
+        headers.set("X-BV-Signature", h.signature());
+        return http.exchange(path, HttpMethod.POST, new HttpEntity<>(body, headers), JsonNode.class)
+                .getStatusCode().value();
     }
 }
