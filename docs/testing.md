@@ -6,7 +6,7 @@
 mvn -B -ntp test                     # unit tests only, no Docker needed (about 1 minute)
 mvn -B -ntp verify                   # + integration tests with Testcontainers (Docker required, about 5 minutes)
 mvn -B -ntp verify -Dit.test=SecurityIT -Dtest=NoSuchTest -Dsurefire.failIfNoSpecifiedTests=false   # one IT class
-cd frontend && npm run typecheck && npm test && npm run build
+cd frontend && npm run lint && npm run typecheck && npm test && npm run build
 python3 -I scripts/bvtool.py smoke   # end-to-end against a running stack
 ```
 

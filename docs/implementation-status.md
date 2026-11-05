@@ -67,10 +67,16 @@ g and h).
 
 Remaining gaps are listed under "Not done" below.
 
+**Production-readiness audit** (2026-11-05): see
+[production-readiness.md](production-readiness.md). It covered the live
+restore drill, all UI flows, a security review, Compose behaviour and code
+quality. Final run: 125 backend and 6 frontend tests passing, with clean lint.
+
 ### Not done (honest list)
-- **Destructive restore drill on the live database.** Restore was verified
-  into a scratch database; reconciliation is covered by `SelfHealingIT`.
-- **Lint/format tooling** (Spotless, ESLint): deferred.
+- **Java formatter:** none (no Spotless or Checkstyle). ESLint and the
+  `-Xlint` compiler checks are in place.
+- **Vitest 5 upgrade:** pending; the dev-tool advisories are accepted, with
+  reasons in the audit.
 - **Grafana dashboards.** The monitoring profile starts Prometheus and Grafana,
   but no dashboards are provisioned, and that profile hasn't been run.
 - **CI on GitHub.** There's no remote; the same commands pass locally.
@@ -80,8 +86,6 @@ Remaining gaps are listed under "Not done" below.
 - **Load testing** beyond the benchmark harness. Rate limits and transfer
   permits aren't tested under load.
 - **Cold-cache, multi-host and large-object benchmarks.**
-- **Browser checks not done:** drain from the UI, the USER-role view, and
-  create-user from the UI. All three are covered by automated tests.
 
 ## Requirements
 
@@ -142,7 +146,7 @@ Remaining gaps are listed under "Not done" below.
 | P6-7 | 64 KiB cap on non-chunk bodies, enforced on Content-Length **and** while reading (so chunked encoding can't bypass it) | Implemented | `RequestLimitsFilter`, `LimitedBodyRequest` | `mvn verify` | 2026-11-04 | both variants → 413 `REQUEST_TOO_LARGE` |
 | P6-8 | CORS allow-list; CSP `default-src 'none'`, `X-Frame-Options: DENY`, `nosniff`, `no-store`; stateless (no CSRF surface) | Implemented | `SecurityConfig` | `mvn verify` | 2026-11-04 | allowed origin echoed; foreign origin preflight → 403 |
 | P6-9 | Metadata backup | Implemented | `scripts/backup-db.sh` | live | 2026-11-04 | 64,584-byte dump, mode 600, git-ignored; restored into a scratch DB with identical counts (4 objects, 52 replicas, 1 user, Flyway v3), then dropped |
-| P6-10 | Guarded restore | Implemented, unverified | `scripts/restore-db.sh` | - | - | **the full drill against the live DB hasn't been run** (destructive; awaiting approval) |
+| P6-10 | Guarded restore | Implemented | `scripts/restore-db.sh` | live drill | 2026-11-05 | backup → post-backup upload → restore: state identical to the backup; reconcile found and removed the 6 orphans; second dry run clean |
 | P6-11 | Inventory reconciliation: orphans (deleted with apply) and missing files (marked LOST, then repaired); dry run by default; audited | Implemented | `backend/.../repair/InventoryReconciler.java`, node `GET /internal/v1/chunks` | `mvn verify`; live | 2026-11-04 | IT: an injected orphan and a deleted file are reported; dry run changed nothing; apply deleted the orphan and repair restored the copy; download hash matches. Live dry run: 13/13/13 files match metadata on 3 nodes, 0 orphans, 0 missing |
 | P6-12 | Operations runbook | Implemented | `docs/operations-runbook.md` | review | 2026-11-04 | |
 | P7F-1 | Operations console: login, overview, nodes (drain/cancel), objects (chunked upload with progress and in-browser SHA-256, detail with per-node replica states, download, delete), repairs, event timeline (correlation filter, lag), admin (DLQ replay, scrub, reconcile, create user) | Implemented | `frontend/src/` | typecheck/test/build + browser | 2026-11-05 | wrong password → error. Overview numbers equal `/api/v1/overview` field by field. A 9,500,000-byte upload through the UI showed per-chunk progress, landed 3/3 VERIFIED on distinct nodes, and its download SHA-256 equals the hash computed in the browser before upload. Delete via the typed confirmation → DELETING → ObjectDeleted in about 4 s. Correlation filter narrows to one event. Scrub: 39/39 intact. Reconcile dry run: 0 orphans, 0 missing. DLQ replay recorded REPLAYED by `admin`. **Not checked in the browser:** drain from the UI (covered by `SelfHealingIT`), the USER-role view (covered by `SecurityIT`), create-user from the UI |

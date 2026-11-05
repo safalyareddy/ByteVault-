@@ -5,6 +5,7 @@
 
 # CLI login token (scripts/bv.sh login)
 .bv-token
+.bv-test-accounts
 
 # Local database backups
 backups/

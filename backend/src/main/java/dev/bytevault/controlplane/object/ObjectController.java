@@ -45,7 +45,18 @@ public class ObjectController {
 
     @GetMapping("/{id}")
     public ObjectDetail get(@PathVariable UUID id) {
-        return queries.detail(owner.username(), id);
+        ObjectDetail detail = queries.detail(owner.username(), id);
+        if (owner.require().role() == dev.bytevault.controlplane.security.Role.ADMIN) {
+            return detail;
+        }
+        // Replica errors can name internal hosts and exception types: operator detail, not for owners.
+        return new ObjectDetail(detail.object(), detail.chunks().stream()
+                .map(c -> new ObjectDtos.ChunkView(c.index(), c.chunkId(), c.byteOffset(), c.byteSize(), c.sha256(),
+                        c.status(), c.verifiedReplicas(), c.replicas().stream()
+                        .map(r -> new ObjectDtos.ReplicaView(r.nodeId(), r.state(), r.nodeState(), r.storedAt(),
+                                r.lastVerifiedAt(), r.lastError() == null ? null : "hidden (operator detail)"))
+                        .toList()))
+                .toList());
     }
 
     @GetMapping("/{id}/download")

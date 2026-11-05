@@ -110,8 +110,7 @@ interleave keys.
 ## Replay
 
 Replay is `POST /api/v1/admin/dlq/{id}/replay` with body `{"reason": "..."}`.
-It requires the `X-BV-Admin-Token` header, an interim measure until Phase 6
-roles exist. It:
+It requires an ADMIN bearer token. It:
 - claims the entry with compare-and-set, so it can only be replayed once
 - re-publishes the original key and value to the original topic, with the
   `eventId` unchanged, plus the headers `bv-replay-attempt` and

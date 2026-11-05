@@ -38,7 +38,9 @@ scripts/         build / up / down / status / gen-env / reset-volumes (destructi
 - JDK 21 or newer. The bytecode targets Java 21, and the containers run Temurin 21.
 - Maven 3.9+
 - Node.js 22 with npm
-- About 4 GB of free disk for images, dependencies and volumes
+- `python3`, `jq`, `curl` and `openssl`, used by the CLI, the smoke test and the env generator (all present on a stock
+  macOS with Homebrew `jq`)
+- At least 6 GB of free disk: images, dependency caches, the Docker build cache and node volumes
 
 ## Quick start
 
@@ -51,8 +53,13 @@ scripts/bv.sh login     # admin password = BV_BOOTSTRAP_ADMIN_PASSWORD in .env
 scripts/bv.sh nodes     # node inventory (ADMIN)
 scripts/bv.sh upload ./some-file          # prints the object id
 scripts/bv.sh download <objectId> ./copy  # verifies size; compare with shasum -a 256
-cd frontend && npm run dev   # console at http://127.0.0.1:5173
 python3 -I scripts/bvtool.py smoke   # end-to-end check; prints SMOKE TEST PASSED
+```
+
+Operations console (run it in a second terminal; it stays in the foreground):
+
+```bash
+cd frontend && npm run dev   # http://127.0.0.1:5173, sign in as admin
 ```
 
 On a machine where the Maven, npm and Docker image caches are already warm,
@@ -70,7 +77,8 @@ scripts/reset-volumes.sh  # DESTRUCTIVE: deletes metadata, Kafka log and chunk d
 Optional profiles: `scripts/up.sh --profile spare` adds node-4, so a lost
 node's copies have somewhere to go. With only 3 nodes and RF=3, repair waits
 for capacity. `--profile monitoring` adds Prometheus (:9090) and Grafana
-(:3001).
+(:3001). That profile hasn't been exercised yet, and no Grafana dashboards
+are provisioned.
 
 Fault injection, all guarded (see `scripts/fault/`):
 
@@ -87,15 +95,16 @@ scripts/fault/pause-kafka.sh stop           # then: start
 | Control plane API | 8090 |
 | PostgreSQL | 55432 |
 | Kafka | 9092 |
-| storage nodes 1–3 | 9101–9103 |
+| storage nodes 1–3 (node-4 with `--profile spare`) | 9101–9103 (9104) |
 | Frontend dev server | 5173 |
+| Prometheus / Grafana (`--profile monitoring`) | 9090 / 3001 |
 
 ## Tests
 
 ```bash
 mvn -B -ntp test     # unit tests, no Docker needed
 mvn -B -ntp verify   # + integration tests against real Postgres/Kafka (Testcontainers, needs Docker)
-cd frontend && npm run typecheck && npm run build
+cd frontend && npm run lint && npm run typecheck && npm test && npm run build
 ```
 
 ## Documentation
@@ -108,7 +117,7 @@ cd frontend && npm run typecheck && npm run build
 - [Storage-node protocol](docs/storage-node-protocol.md)
 - [Security threat model](docs/security-threat-model.md)
 - [Operations runbook](docs/operations-runbook.md): accounts, backup/restore, reconciliation, failure handling
-- [Implementation status](docs/implementation-status.md)
+- [Implementation status](docs/implementation-status.md) and [production-readiness audit](docs/production-readiness.md)
 
 ## Limitations
 

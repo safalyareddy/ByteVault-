@@ -18,7 +18,7 @@ import org.springframework.stereotype.Component;
  * directory is unusable rather than accepting writes it cannot persist.
  */
 @Component
-public class DataDirectory {
+public final class DataDirectory {
 
     private static final Logger log = LoggerFactory.getLogger(DataDirectory.class);
 
