@@ -6,18 +6,17 @@ across independent storage-node processes. PostgreSQL holds the authoritative
 metadata, Kafka carries domain events through a transactional outbox, and the
 system detects failures and repairs from verified replicas.
 
-> **Status:** Phases 0–6 and the operations dashboard are done. Chunked upload and
-> download work, with 3 checksum-verified replicas on distinct nodes, signed node
-> heartbeats with admission and failure detection,
-> read-path corruption detection, asynchronous delete, and Kafka events through
-> a transactional outbox with idempotent consumers, a DLQ and guarded replay.
-> Self-healing works: OFFLINE detection, repair from verified replicas, a
-> checksum scrubber, rejoin reconciliation and drain. Security covers USER/ADMIN
-> roles, hashed revocable tokens, rate and size limits, backup and
-> reconciliation. Every screen of the operations console was checked live in a
-> browser. Still to do: benchmarks, a fresh-clone run-through and the demo
-> script.
-> The exact state, with test evidence, is in
+> **Status:** all planned phases are implemented and verified.
+> - Chunked storage with 3 verified replicas on distinct nodes
+> - Signed heartbeats with failure detection
+> - Self-healing: repair, scrubbing, drain and reconciliation
+> - Kafka events through a transactional outbox, with idempotent consumers, a
+>   DLQ and replay
+> - Authentication with USER/ADMIN roles
+> - An operations console
+> - Measured benchmarks
+>
+> Evidence for every claim, and an explicit list of what's **not** done, is in
 > [docs/implementation-status.md](docs/implementation-status.md).
 
 ## Layout
@@ -53,7 +52,13 @@ scripts/bv.sh nodes     # node inventory (ADMIN)
 scripts/bv.sh upload ./some-file          # prints the object id
 scripts/bv.sh download <objectId> ./copy  # verifies size; compare with shasum -a 256
 cd frontend && npm run dev   # console at http://127.0.0.1:5173
+python3 -I scripts/bvtool.py smoke   # end-to-end check; prints SMOKE TEST PASSED
 ```
+
+On a machine where the Maven, npm and Docker image caches are already warm,
+the quick start takes about a minute from a fresh clone to a passing smoke
+test. A new machine first downloads roughly 1–2 GB of dependencies and
+images.
 
 Stopping and resetting:
 
@@ -95,6 +100,8 @@ cd frontend && npm run typecheck && npm run build
 
 ## Documentation
 
+- [Demo script](docs/demo-script.md) (about 7 minutes) and [benchmark report](docs/benchmark-report.md)
+- [OpenAPI spec](docs/openapi.json) (also served at `/v3/api-docs`), [data model](docs/data-model.md), [testing guide](docs/testing.md)
 - [Architecture](docs/architecture.md) and [ADRs](docs/adr/README.md)
 - [State machines](docs/state-machines.md)
 - [Kafka topics and events](docs/kafka-events.md)
