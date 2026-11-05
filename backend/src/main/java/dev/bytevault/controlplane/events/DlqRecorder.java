@@ -65,7 +65,7 @@ public class DlqRecorder {
                         : number(record, KafkaHeaders.DLT_ORIGINAL_PARTITION).intValue())
                 .param("oo", number(record, KafkaHeaders.DLT_ORIGINAL_OFFSET))
                 .param("cg", text(record, KafkaConsumerConfig.HEADER_CONSUMER_GROUP))
-                .param("reason", truncate(text(record, KafkaHeaders.DLT_EXCEPTION_MESSAGE), 2000))
+                .param("reason", truncate(rootReason(text(record, KafkaHeaders.DLT_EXCEPTION_MESSAGE)), 2000))
                 .param("attempts", attempts == null ? null : Integer.valueOf(attempts))
                 .param("failed", Timestamp.from(Instant.ofEpochMilli(record.timestamp())))
                 .param("cid", correlationId)
@@ -90,6 +90,15 @@ public class DlqRecorder {
             case 8 -> ByteBuffer.wrap(v).getLong();
             default -> null;
         };
+    }
+
+    /** Drops Spring's "Listener method '...' threw exception; " wrapper, keeping the actual cause. */
+    static String rootReason(String message) {
+        if (message == null) {
+            return null;
+        }
+        int i = message.lastIndexOf("threw exception; ");
+        return i >= 0 ? message.substring(i + "threw exception; ".length()) : message;
     }
 
     private static String truncate(String s, int max) {

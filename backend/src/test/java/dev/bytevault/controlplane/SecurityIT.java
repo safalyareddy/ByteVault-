@@ -99,7 +99,7 @@ class SecurityIT {
         String alice = TestAuth.login(http, "alice", ALICE_PASSWORD);
         assertThat(call(HttpMethod.GET, "/api/v1/objects", alice, null).getStatusCode().value()).isEqualTo(200);
         for (String path : new String[] {"/api/v1/nodes", "/api/v1/repairs", "/api/v1/events", "/api/v1/stats",
-                "/api/v1/admin/dlq"}) {
+                "/api/v1/overview", "/api/v1/admin/dlq"}) {
             ResponseEntity<JsonNode> res = call(HttpMethod.GET, path, alice, null);
             assertThat(res.getStatusCode().value()).as(path).isEqualTo(403);
             assertThat(res.getBody().get("code").asText()).isEqualTo("FORBIDDEN");
@@ -111,6 +111,10 @@ class SecurityIT {
                 Map.of("username", "mallory", "password", "mallory-password-1", "role", "ADMIN"))
                 .getStatusCode().value()).isEqualTo(403);
         assertThat(call(HttpMethod.GET, "/api/v1/nodes", admin, null).getStatusCode().value()).isEqualTo(200);
+        JsonNode overview = call(HttpMethod.GET, "/api/v1/overview", admin, null).getBody();
+        assertThat(overview.get("nodesByState").has("HEALTHY")).isTrue();
+        assertThat(overview.get("objects").has("storedBytes")).isTrue();
+        assertThat(overview.get("events").has("outboxBacklog")).isTrue();
     }
 
     @Test

@@ -55,7 +55,7 @@ public class SecurityConfig {
                         // Bound to 127.0.0.1 / the Compose network only; see threat model T14.
                         .requestMatchers("/actuator/health/**", "/actuator/info", "/actuator/prometheus").permitAll()
                         .requestMatchers("/api/v1/admin/**", "/api/v1/nodes/**", "/api/v1/repairs/**",
-                                "/api/v1/events/**", "/api/v1/stats").hasRole(Role.ADMIN.name())
+                                "/api/v1/events/**", "/api/v1/stats", "/api/v1/overview").hasRole(Role.ADMIN.name())
                         .requestMatchers("/api/v1/uploads/**", "/api/v1/objects/**", "/api/v1/auth/**")
                                 .hasAnyRole(Role.USER.name(), Role.ADMIN.name())
                         .anyRequest().authenticated())

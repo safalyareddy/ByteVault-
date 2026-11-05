@@ -6,7 +6,7 @@ across independent storage-node processes. PostgreSQL holds the authoritative
 metadata, Kafka carries domain events through a transactional outbox, and the
 system detects failures and repairs from verified replicas.
 
-> **Status:** Phases 0–6 are done. Chunked upload and
+> **Status:** Phases 0–6 and the operations dashboard are done. Chunked upload and
 > download work, with 3 checksum-verified replicas on distinct nodes, signed node
 > heartbeats with admission and failure detection,
 > read-path corruption detection, asynchronous delete, and Kafka events through
@@ -14,7 +14,9 @@ system detects failures and repairs from verified replicas.
 > Self-healing works: OFFLINE detection, repair from verified replicas, a
 > checksum scrubber, rejoin reconciliation and drain. Security covers USER/ADMIN
 > roles, hashed revocable tokens, rate and size limits, backup and
-> reconciliation. The operations dashboard is **not implemented yet**.
+> reconciliation. Every screen of the operations console was checked live in a
+> browser. Still to do: benchmarks, a fresh-clone run-through and the demo
+> script.
 > The exact state, with test evidence, is in
 > [docs/implementation-status.md](docs/implementation-status.md).
 
