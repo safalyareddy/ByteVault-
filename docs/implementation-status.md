@@ -57,6 +57,36 @@ stop, a Kafka stop and a control-plane stop with the console open. These
 checks found two failure-detector defects, which are now fixed (note 4, items
 g and h).
 
+**Final phase (hardening and delivery):** done on 2026-11-05:
+- OpenAPI published
+- smoke test and benchmark harness
+- measured benchmarks (3 runs each)
+- fresh-clone run-through
+- demo script
+- data model and testing guides
+
+Remaining gaps are listed under "Not done" below.
+
+**Production-readiness audit** (2026-11-05): see
+[production-readiness.md](production-readiness.md). It covered the live
+restore drill, all UI flows, a security review, Compose behaviour and code
+quality. Final run: 125 backend and 6 frontend tests passing, with clean lint.
+
+### Not done (honest list)
+- **Java formatter:** none (no Spotless or Checkstyle). ESLint and the
+  `-Xlint` compiler checks are in place.
+- **Vitest 5 upgrade:** pending; the dev-tool advisories are accepted, with
+  reasons in the audit.
+- **Grafana dashboards.** The monitoring profile starts Prometheus and Grafana,
+  but no dashboards are provisioned, and that profile hasn't been run.
+- **CI on GitHub.** There's no remote; the same commands pass locally.
+- **No account management:** no password change, MFA, or user
+  disable/delete endpoint.
+- **No degraded override for drain.**
+- **Load testing** beyond the benchmark harness. Rate limits and transfer
+  permits aren't tested under load.
+- **Cold-cache, multi-host and large-object benchmarks.**
+
 ## Requirements
 
 | ID | Requirement | Status | Location | Verification command | Last run | Evidence |
@@ -116,12 +146,17 @@ g and h).
 | P6-7 | 64 KiB cap on non-chunk bodies, enforced on Content-Length **and** while reading (so chunked encoding can't bypass it) | Implemented | `RequestLimitsFilter`, `LimitedBodyRequest` | `mvn verify` | 2026-11-04 | both variants → 413 `REQUEST_TOO_LARGE` |
 | P6-8 | CORS allow-list; CSP `default-src 'none'`, `X-Frame-Options: DENY`, `nosniff`, `no-store`; stateless (no CSRF surface) | Implemented | `SecurityConfig` | `mvn verify` | 2026-11-04 | allowed origin echoed; foreign origin preflight → 403 |
 | P6-9 | Metadata backup | Implemented | `scripts/backup-db.sh` | live | 2026-11-04 | 64,584-byte dump, mode 600, git-ignored; restored into a scratch DB with identical counts (4 objects, 52 replicas, 1 user, Flyway v3), then dropped |
-| P6-10 | Guarded restore | Implemented, unverified | `scripts/restore-db.sh` | - | - | **the full drill against the live DB hasn't been run** (destructive; awaiting approval) |
+| P6-10 | Guarded restore | Implemented | `scripts/restore-db.sh` | live drill | 2026-11-05 | backup → post-backup upload → restore: state identical to the backup; reconcile found and removed the 6 orphans; second dry run clean |
 | P6-11 | Inventory reconciliation: orphans (deleted with apply) and missing files (marked LOST, then repaired); dry run by default; audited | Implemented | `backend/.../repair/InventoryReconciler.java`, node `GET /internal/v1/chunks` | `mvn verify`; live | 2026-11-04 | IT: an injected orphan and a deleted file are reported; dry run changed nothing; apply deleted the orphan and repair restored the copy; download hash matches. Live dry run: 13/13/13 files match metadata on 3 nodes, 0 orphans, 0 missing |
 | P6-12 | Operations runbook | Implemented | `docs/operations-runbook.md` | review | 2026-11-04 | |
 | P7F-1 | Operations console: login, overview, nodes (drain/cancel), objects (chunked upload with progress and in-browser SHA-256, detail with per-node replica states, download, delete), repairs, event timeline (correlation filter, lag), admin (DLQ replay, scrub, reconcile, create user) | Implemented | `frontend/src/` | typecheck/test/build + browser | 2026-11-05 | wrong password → error. Overview numbers equal `/api/v1/overview` field by field. A 9,500,000-byte upload through the UI showed per-chunk progress, landed 3/3 VERIFIED on distinct nodes, and its download SHA-256 equals the hash computed in the browser before upload. Delete via the typed confirmation → DELETING → ObjectDeleted in about 4 s. Correlation filter narrows to one event. Scrub: 39/39 intact. Reconcile dry run: 0 orphans, 0 missing. DLQ replay recorded REPLAYED by `admin`. **Not checked in the browser:** drain from the UI (covered by `SelfHealingIT`), the USER-role view (covered by `SecurityIT`), create-user from the UI |
 | P7F-2 | No hardcoded live values; loading / empty / error / offline / degraded / stale states | Implemented | `hooks/usePoll.ts`, `components/ui.tsx`, `components/Layout.tsx` | browser with live faults | 2026-11-05 | node-2 stopped: SUSPECT at 19 s, OFFLINE with red/amber cards mid-repair, then restored. Kafka stopped: DOWN badge, amber "kafka not ready" banner, outbox backlog 2. Control plane stopped: OFFLINE badge, red banner, every panel "Stale — last updated …" with last data kept |
 | P7F-3 | `GET /api/v1/overview` (ADMIN) | Implemented | `backend/.../events/OverviewController.java` | `mvn verify` (`SecurityIT`) | 2026-11-04 | USER → 403; ADMIN body has nodes, objects and events blocks |
+| P8-1 | OpenAPI 3 description of the public API | Implemented | `OpenApiConfig`, springdoc 2.8.9, `docs/openapi.json` | `curl :8090/v3/api-docs` | 2026-11-05 | 23 paths, bearer security scheme; node-internal protocol documented separately |
+| P8-2 | Smoke test (login, upload, replica check, download hash, delete) without exposing credentials | Implemented | `scripts/bvtool.py smoke` | run | 2026-11-05 | PASSED on the main stack and on the fresh clone |
+| P8-3 | Reproducible benchmarks: throughput, p50/p95 latency, event lag, CPU/RAM, repair duration; ≥ 3 runs; raw output | Implemented | `scripts/bvtool.py bench`, `bench-repair`; `docs/benchmark-report.md` | run | 2026-11-05 | 12 throughput runs and 3 repair runs, every download hash-verified; high variance reported, not hidden |
+| P8-4 | Fresh-clone reproducibility | Implemented | README quick start | clone + `gen-env` / `build` / `up` / `status` / smoke under `COMPOSE_PROJECT_NAME=bvfresh` | 2026-11-05 | 61 s from clone to SMOKE TEST PASSED on new volumes with new secrets. **Caveat:** Maven, npm and Docker images were already cached on this machine, so a new machine needs extra download time |
+| P8-5 | Demo script, data model (ERD), testing guide | Implemented | `docs/demo-script.md`, `docs/data-model.md`, `docs/testing.md` | review | 2026-11-05 | |
 | P2-10 | Outbox rows written in the same transaction as state changes | Implemented | `backend/.../outbox/OutboxWriter.java` | `mvn verify` | 2026-11-04 | refuses to run outside a transaction; rows published by P4-1 |
 | P4-1 | Outbox publisher: SKIP LOCKED claim, ordered send with aggregate key, acked-prefix marking, global backoff with jitter | Implemented | `backend/.../outbox/OutboxPublisher.java` | `mvn verify` (`KafkaReliabilityIT`) | 2026-11-04 | published_at set after the ack; outage test below. Live: 12 events left over from Phases 2–3 were published on deploy, and the projection matched the database |
 | P4-2 | Idempotent consumers: `processed_events` in the effect transaction, aggregate-version check | Implemented | `backend/.../events/IdempotentProcessor.java`, `ObjectStatsConsumer`, `TimelineConsumer` | `mvn verify` | 2026-11-04 | `duplicateDeliveryProducesOneLogicalEffect` (same message sent twice → +777 bytes once, 1 timeline row) |
@@ -154,6 +189,8 @@ g and h).
 | 2026-11-04 | `mvn -B -ntp verify` (Phase 2) | **58 tests, 0 failures, 0 skipped**: node-protocol 6, storage-node 19, backend unit 17, backend IT 16 (`FoundationIT` 8, `StorageIT` 8, with 3 real node containers) |
 | 2026-11-04 | `mvn -B -ntp verify` (Phase 3) | **71 tests, 0 failures, 0 skipped**: node-protocol 6, storage-node 21, backend unit 27, backend IT 17 (`StorageIT` 9 with 5 node containers, 2 of them deliberately misconfigured) |
 | 2026-11-04 | `mvn -B -ntp verify` (Phase 4) | **101 tests, 0 failures, 0 skipped**: node-protocol 6, storage-node 21, backend unit 49, backend IT 25 (`FoundationIT` 8, `StorageIT` 9, `KafkaReliabilityIT` 8) |
+| 2026-11-05 | `python3 -I scripts/bvtool.py bench` and `bench-repair` | see `docs/benchmark-report.md`; all 15 runs verified |
+| 2026-11-05 | fresh clone (`bvfresh`): README quick start + smoke | PASSED in 61 s; the project and its volumes were removed afterwards |
 | 2026-11-05 | live: 70 s `docker compose pause backend`; then 80 s `stop backend` + `start` | 0 node transitions, 0 repair jobs, 0 LOST, all nodes HEALTHY (before the fix: all 4 nodes OFFLINE in both cases) |
 | 2026-11-04 | `mvn -B -ntp verify` (with overview API) | 122 tests, 0 failures |
 | 2026-11-04 | `npm run typecheck && npm test && npm run build` (frontend) | clean; 6/6 tests; build OK |

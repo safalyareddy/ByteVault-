@@ -140,6 +140,30 @@ class SecurityIT {
     }
 
     @Test
+    @Order(10)
+    void replicaErrorsAreShownToAdminsOnly() {
+        String admin = adminToken();
+        ensureAlice(admin);
+        String alice = TestAuth.login(http, "alice", ALICE_PASSWORD);
+        UUID object = jdbc.queryForObject("""
+                INSERT INTO objects (owner_id, name, total_size, chunk_size, chunk_count, status, replication_factor)
+                VALUES ('alice', 'alices.bin', 10, 1048576, 1, 'COMPLETE', 3) RETURNING id
+                """, UUID.class);
+        UUID chunk = jdbc.queryForObject("INSERT INTO chunks (object_id, chunk_index, byte_offset, byte_size, status) "
+                + "VALUES (?, 0, 0, 10, 'STORED') RETURNING id", UUID.class, object);
+        jdbc.update("INSERT INTO storage_nodes (id, endpoint, state, protocol_version) VALUES ('sec-node', "
+                + "'http://internal-host:9100', 'HEALTHY', 1) ON CONFLICT DO NOTHING");
+        jdbc.update("INSERT INTO chunk_replicas (chunk_id, node_id, state, last_error) VALUES (?, 'sec-node', "
+                + "'FAILED_WRITE', 'ConnectException: internal-host:9100 refused')", chunk);
+        String asAlice = call(HttpMethod.GET, "/api/v1/objects/" + object, alice, null).getBody().toString();
+        assertThat(asAlice).doesNotContain("internal-host").contains("hidden (operator detail)");
+        // An admin viewing their own object sees the full error; insert one owned by admin.
+        jdbc.update("UPDATE objects SET owner_id = 'admin' WHERE id = ?", object);
+        assertThat(call(HttpMethod.GET, "/api/v1/objects/" + object, admin, null).getBody().toString())
+                .contains("internal-host:9100 refused");
+    }
+
+    @Test
     @Order(5)
     void logoutAndExpiryInvalidateTokens() {
         String token = adminToken();
