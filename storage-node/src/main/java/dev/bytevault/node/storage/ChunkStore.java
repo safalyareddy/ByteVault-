@@ -159,6 +159,24 @@ public class ChunkStore {
         return Optional.of(new Verification(found.get().sha256(), Sha256.hex(digest.digest()), total));
     }
 
+    /**
+     * Chunk IDs stored on this node in ascending order, strictly after {@code after} (null = from
+     * the start), at most {@code limit}. Walks the shard directories; intended for reconciliation,
+     * not hot paths.
+     */
+    public java.util.List<UUID> list(UUID after, int limit) throws IOException {
+        String from = after == null ? "" : after.toString();
+        try (var files = Files.walk(dataDirectory.chunksDir(), 3)) {
+            return files.filter(f -> f.getFileName().toString().endsWith(".chunk"))
+                    .map(f -> f.getFileName().toString().replace(".chunk", ""))
+                    .filter(name -> name.compareTo(from) > 0)
+                    .sorted()
+                    .limit(limit)
+                    .map(UUID::fromString)
+                    .toList();
+        }
+    }
+
     /** Deletes the chunk and its sidecar. Returns false if it was already absent. Idempotent. */
     public boolean delete(UUID chunkId) throws IOException {
         ReentrantLock lock = lockFor(chunkId);

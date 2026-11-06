@@ -56,6 +56,18 @@ public final class NodeLifecycle {
         };
     }
 
+    /**
+     * True when the observer itself was paused (host sleep, VM freeze, long GC): the gap since its
+     * previous evaluation is far longer than its schedule allows. Heartbeat ages measured right
+     * after such a pause reflect the observer's absence, not the nodes', so they must not be
+     * judged until nodes have had time to report again.
+     */
+    public static boolean observerPaused(Duration sinceLastEvaluation, Duration evaluationInterval) {
+        Duration threshold = evaluationInterval.multipliedBy(5).compareTo(Duration.ofSeconds(5)) > 0
+                ? evaluationInterval.multipliedBy(5) : Duration.ofSeconds(5);
+        return sinceLastEvaluation.compareTo(threshold) > 0;
+    }
+
     /** True when a SUSPECT node has been silent longer than the offline threshold. */
     public static boolean shouldMarkOffline(NodeState state, Duration heartbeatAge, Duration offlineAfter) {
         return state == SUSPECT && (heartbeatAge == null || heartbeatAge.compareTo(offlineAfter) > 0);

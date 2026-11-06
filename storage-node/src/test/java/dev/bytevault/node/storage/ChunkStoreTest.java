@@ -125,6 +125,21 @@ class ChunkStoreTest {
     }
 
     @Test
+    void listPagesThroughStoredChunksInOrder() throws Exception {
+        java.util.List<UUID> ids = new java.util.ArrayList<>();
+        for (int i = 0; i < 5; i++) {
+            UUID id = UUID.randomUUID();
+            byte[] d = random(10, 100 + i);
+            store.put(id, new ByteArrayInputStream(d), d.length, Sha256.of(d));
+            ids.add(id);
+        }
+        ids.sort(java.util.Comparator.comparing(UUID::toString));
+        var first = store.list(null, 3);
+        assertThat(first).containsExactlyElementsOf(ids.subList(0, 3));
+        assertThat(store.list(first.get(2), 3)).containsExactlyElementsOf(ids.subList(3, 5));
+    }
+
+    @Test
     void deleteIsIdempotent() throws Exception {
         byte[] data = random(10, 7);
         UUID id = UUID.randomUUID();

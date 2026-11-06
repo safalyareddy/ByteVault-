@@ -57,6 +57,11 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(HttpMessageNotReadableException.class)
     ResponseEntity<ApiError> unreadable(HttpMessageNotReadableException ex, HttpServletRequest req) {
+        for (Throwable t = ex; t != null; t = t.getCause()) {
+            if (t instanceof dev.bytevault.controlplane.security.LimitedBodyRequest.BodyTooLargeException) {
+                return build(HttpStatus.PAYLOAD_TOO_LARGE, "REQUEST_TOO_LARGE", t.getMessage(), req, List.of());
+            }
+        }
         return build(HttpStatus.BAD_REQUEST, "MALFORMED_REQUEST", "Request body is missing or malformed", req, List.of());
     }
 

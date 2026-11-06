@@ -65,7 +65,14 @@ spring:
       missing-topics-fatal: false
 
 bytevault:
-  admin-token: ${BV_ADMIN_TOKEN:}
+  security:
+    bootstrap-admin-username: ${BV_BOOTSTRAP_ADMIN_USERNAME:admin}
+    bootstrap-admin-password: ${BV_BOOTSTRAP_ADMIN_PASSWORD:}
+    token-ttl: ${BV_TOKEN_TTL:12h}
+    login-attempts-per-minute: ${BV_LOGIN_ATTEMPTS_PER_MINUTE:10}
+    api-requests-per-minute: ${BV_API_REQUESTS_PER_MINUTE:1200}
+    max-json-body-bytes: ${BV_MAX_JSON_BODY_BYTES:65536}
+    cors-allowed-origins: ${BV_CORS_ALLOWED_ORIGINS:http://127.0.0.1:5173,http://localhost:5173}
   chunk-size-bytes: ${BV_CHUNK_SIZE_BYTES:4194304}
   replication-factor: ${BV_REPLICATION_FACTOR:3}
   max-upload-bytes: ${BV_MAX_UPLOAD_BYTES:1073741824}

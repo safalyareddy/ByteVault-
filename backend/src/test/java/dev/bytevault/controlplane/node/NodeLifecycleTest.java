@@ -54,6 +54,18 @@ class NodeLifecycleTest {
     }
 
     @Test
+    void observerPauseIsRecognisedFromItsOwnScheduleGap() {
+        Duration every = Duration.ofSeconds(1);
+        assertThat(NodeLifecycle.observerPaused(Duration.ofMillis(1_200), every)).isFalse();
+        assertThat(NodeLifecycle.observerPaused(Duration.ofSeconds(5), every)).as("at threshold").isFalse();
+        assertThat(NodeLifecycle.observerPaused(Duration.ofSeconds(6), every)).isTrue();
+        assertThat(NodeLifecycle.observerPaused(Duration.ofSeconds(306), every)).as("laptop sleep").isTrue();
+        assertThat(NodeLifecycle.observerPaused(Duration.ofSeconds(20), Duration.ofSeconds(5)))
+                .as("threshold scales with a slower schedule").isFalse();
+        assertThat(NodeLifecycle.observerPaused(Duration.ofSeconds(26), Duration.ofSeconds(5))).isTrue();
+    }
+
+    @Test
     void onlyLongSilentSuspectNodesGoOffline() {
         Duration offline = Duration.ofSeconds(45);
         assertThat(NodeLifecycle.shouldMarkOffline(NodeState.SUSPECT, Duration.ofSeconds(46), offline)).isTrue();

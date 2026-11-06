@@ -4,7 +4,7 @@ import dev.bytevault.controlplane.upload.UploadDtos.ChunkUploadResult;
 import dev.bytevault.controlplane.upload.UploadDtos.CompleteResult;
 import dev.bytevault.controlplane.upload.UploadDtos.CreateUploadRequest;
 import dev.bytevault.controlplane.upload.UploadDtos.UploadView;
-import dev.bytevault.controlplane.web.CurrentOwner;
+import dev.bytevault.controlplane.security.CurrentUser;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import java.io.IOException;
@@ -26,9 +26,9 @@ import org.springframework.web.bind.annotation.RestController;
 public class UploadController {
 
     private final UploadService uploads;
-    private final CurrentOwner owner;
+    private final CurrentUser owner;
 
-    public UploadController(UploadService uploads, CurrentOwner owner) {
+    public UploadController(UploadService uploads, CurrentUser owner) {
         this.uploads = uploads;
         this.owner = owner;
     }
@@ -37,13 +37,13 @@ public class UploadController {
     @PostMapping
     public ResponseEntity<UploadView> create(@RequestHeader("Idempotency-Key") String idempotencyKey,
                                              @Valid @RequestBody CreateUploadRequest request) {
-        UploadView view = uploads.create(owner.id(), idempotencyKey, request);
+        UploadView view = uploads.create(owner.username(), idempotencyKey, request);
         return ResponseEntity.status(view.replayed() ? HttpStatus.OK : HttpStatus.CREATED).body(view);
     }
 
     @GetMapping("/{uploadId}")
     public UploadView get(@PathVariable UUID uploadId) {
-        return uploads.get(owner.id(), uploadId);
+        return uploads.get(owner.username(), uploadId);
     }
 
     /**
@@ -55,7 +55,7 @@ public class UploadController {
                                                       @RequestHeader(value = "X-Chunk-SHA256", required = false) String sha256,
                                                       HttpServletRequest request) throws IOException {
         try (InputStream body = request.getInputStream()) {
-            ChunkUploadResult result = uploads.putChunk(owner.id(), uploadId, index, request.getContentLengthLong(),
+            ChunkUploadResult result = uploads.putChunk(owner.username(), uploadId, index, request.getContentLengthLong(),
                     sha256, body);
             return ResponseEntity.status(result.stored() ? HttpStatus.OK : HttpStatus.BAD_GATEWAY).body(result);
         }
@@ -63,6 +63,6 @@ public class UploadController {
 
     @PostMapping("/{uploadId}/complete")
     public CompleteResult complete(@PathVariable UUID uploadId) {
-        return uploads.complete(owner.id(), uploadId);
+        return uploads.complete(owner.username(), uploadId);
     }
 }

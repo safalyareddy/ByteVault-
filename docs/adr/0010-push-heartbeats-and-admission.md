@@ -32,6 +32,11 @@ and for a JOINING → HEALTHY lifecycle.
   reporting `DOWN` or an unwritable data directory moves a HEALTHY node to
   SUSPECT at once. A valid `UP` heartbeat moves a SUSPECT node back to
   HEALTHY. The OFFLINE transition and replica-LOST handling come in Phase 5.
+- **Observer pauses:** if the detector itself didn't run for more than 5× its
+  interval (host sleep, VM freeze, long GC), and also at process start, it
+  doesn't judge heartbeat ages for one `BV_SUSPECT_AFTER` window. Otherwise
+  the observer's own absence reads as every node failing at once, which is
+  what happened on a sleeping laptop.
 - The endpoint the node advertises is recorded, but the control plane always
   dials the endpoint from its own configuration, because a node must not be
   able to redirect traffic.

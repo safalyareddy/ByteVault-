@@ -14,6 +14,6 @@ sed -e "s/^DATABASE_PASSWORD=.*/DATABASE_PASSWORD=$(secret)/" \
     -e "s/^BV_NODE_3_SECRET=.*/BV_NODE_3_SECRET=$(secret)/" \
     -e "s/^BV_NODE_4_SECRET=[^ ]*/BV_NODE_4_SECRET=$(secret)/" \
     -e "s/^GRAFANA_ADMIN_PASSWORD=.*/GRAFANA_ADMIN_PASSWORD=$(secret)/" \
-    -e "s/^BV_ADMIN_TOKEN=.*/BV_ADMIN_TOKEN=$(secret)/" \
+    -e "s/^BV_BOOTSTRAP_ADMIN_PASSWORD=.*/BV_BOOTSTRAP_ADMIN_PASSWORD=$(secret)/" \
     "$ROOT/.env.example" > "$ENV_FILE"
-echo "Wrote $ENV_FILE (mode 600) with random secrets."
+echo "Wrote $ENV_FILE (mode 600) with random secrets. The admin password is BV_BOOTSTRAP_ADMIN_PASSWORD in that file."
