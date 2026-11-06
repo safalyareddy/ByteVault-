@@ -16,6 +16,9 @@ frontend/dist/
 frontend/node_modules/
 *.log
 
+# Python
+__pycache__/
+
 # Local data, never committed
 data/
 benchmarks/raw/

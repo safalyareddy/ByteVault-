@@ -26,7 +26,7 @@ test suites. Results reused from the previous audit
 | 11 | Final smoke test | **PASS** |
 | — | Console UI for the drain, user and creation flows | **NOT TESTED this run.** Reused: PASS in the 2026-11-05 audit on the same build. This run checked the API those screens call |
 | — | Monitoring profile (Prometheus/Grafana) | **NOT TESTED**; a known gap |
-| — | CI on GitHub | **NOT TESTED**; nothing has been pushed |
+| — | CI on GitHub | **NOT TESTED** during this verification; nothing had been pushed. **Passed afterwards** (see Follow-up) |
 
 **Bugs found: none.** One harness expectation was wrong and was corrected
 (see 5).
@@ -189,6 +189,24 @@ Afterwards:
 - all 4 nodes HEALTHY
 - every seeded object passes the full disk-and-download integrity check
 - `/stats` `consistent=true`, outbox backlog 0
+
+## Follow-up: GitHub Actions (after this verification)
+
+CI wasn't part of the verification above, because nothing had been pushed
+yet. After the repository was pushed, GitHub Actions ran the CI workflow on
+`main`.
+
+- **First run, at `6da2a48`:** the Java job found a **test-order bug**.
+  `SecurityIT` shares a cached Spring test context with `FoundationIT`. When
+  `FoundationIT` ran first, its admin login leaked into `SecurityIT`'s
+  "no token" requests. The application's authentication was not affected:
+  the live API returned 401 without a token.
+- **Fix:** `b02df9c` makes `SecurityIT` clear that login before each test. It
+  is a test-only change.
+- **Second run, at `a49d571`:** **passed**.
+  - Java build and tests: **125/125**.
+  - Frontend lint, typecheck, tests, build and runtime audit: all passed.
+  - Compose config validation: passed.
 
 ## Leftovers on the local stack (not in git)
 
