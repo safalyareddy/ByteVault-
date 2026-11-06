@@ -50,20 +50,6 @@ public class NodeClient {
         return nodes;
     }
 
-    public record NodeHealth(String nodeId, int protocolVersion, String status, boolean dataDirWritable,
-                             long capacityBytes, long usableBytes) {}
-
-    public NodeHealth health(String nodeId) throws IOException, InterruptedException {
-        NodeConfig node = node(nodeId);
-        HttpRequest req = HttpRequest.newBuilder(node.endpoint().resolve(NodeProtocol.HEALTH_PATH))
-                .timeout(Duration.ofSeconds(3)).GET().build();
-        HttpResponse<byte[]> res = http.send(req, HttpResponse.BodyHandlers.ofByteArray());
-        if (res.statusCode() != 200 && res.statusCode() != 503) {
-            throw new IOException("health returned HTTP " + res.statusCode());
-        }
-        return json.readValue(res.body(), NodeHealth.class);
-    }
-
     public record PutResult(boolean success, String sha256, String error) {}
 
     /** Uploads a spooled chunk. Success requires the node's echoed checksum to equal ours. */
@@ -136,6 +122,59 @@ public class NodeClient {
             return new FetchResult(FetchStatus.UNAVAILABLE, null, "interrupted");
         } catch (IOException e) {
             return new FetchResult(FetchStatus.UNAVAILABLE, null, e.getClass().getSimpleName() + ": " + e.getMessage());
+        }
+    }
+
+    public record VerifyResult(FetchStatus status, String actualSha256, long sizeBytes, String error) {
+        /** True only if the node read the bytes back and they match what metadata expects. */
+        public boolean matches(String expectedSha256, long expectedSize) {
+            return status == FetchStatus.OK && expectedSha256.equals(actualSha256) && sizeBytes == expectedSize;
+        }
+    }
+
+    /**
+     * Asks a node to re-hash a chunk from disk (scrubber, repair target check, reconciliation).
+     * Status OK means the node answered; the caller compares the hash with metadata.
+     */
+    public VerifyResult verifyChunk(String nodeId, UUID chunkId) {
+        try {
+            HttpRequest req = signed(nodeId, "POST", NodeProtocol.verifyPath(chunkId), NodeProtocol.NO_BODY)
+                    .POST(HttpRequest.BodyPublishers.noBody()).build();
+            HttpResponse<byte[]> res = http.send(req, HttpResponse.BodyHandlers.ofByteArray());
+            if (res.statusCode() == 404) {
+                return new VerifyResult(FetchStatus.MISSING, null, 0, "chunk not found on node");
+            }
+            if (res.statusCode() != 200) {
+                return new VerifyResult(FetchStatus.UNAVAILABLE, null, 0, "HTTP " + res.statusCode());
+            }
+            var body = json.readTree(res.body());
+            return new VerifyResult(FetchStatus.OK, body.path("actualSha256").asText(), body.path("sizeBytes").asLong(),
+                    null);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return new VerifyResult(FetchStatus.UNAVAILABLE, null, 0, "interrupted");
+        } catch (IOException e) {
+            return new VerifyResult(FetchStatus.UNAVAILABLE, null, 0, e.getClass().getSimpleName() + ": " + e.getMessage());
+        }
+    }
+
+    public enum ProbeResult { AUTHENTICATED, REJECTED, UNREACHABLE }
+
+    /**
+     * Admission probe (ADR-0010): a signed GET of a chunk ID that is never allocated. A 404 proves
+     * the configured endpoint is reachable and that both sides hold the same secret.
+     */
+    public ProbeResult admissionProbe(String nodeId) {
+        try {
+            HttpRequest req = signed(nodeId, "GET", NodeProtocol.chunkPath(NodeProtocol.PROBE_CHUNK_ID),
+                    NodeProtocol.NO_BODY).timeout(Duration.ofSeconds(2)).GET().build();
+            int status = http.send(req, HttpResponse.BodyHandlers.discarding()).statusCode();
+            return status == 404 ? ProbeResult.AUTHENTICATED : ProbeResult.REJECTED;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return ProbeResult.UNREACHABLE;
+        } catch (IOException e) {
+            return ProbeResult.UNREACHABLE;
         }
     }
 

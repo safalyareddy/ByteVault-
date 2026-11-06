@@ -56,8 +56,12 @@ public class NodeRepository {
                 .param("usable", usableBytes).update();
     }
 
-    /** Compare-and-set state change. Returns false if the node was not in {@code from}. */
+    /**
+     * Compare-and-set state change. Returns false if the node was not in {@code from}. Rejects
+     * transitions the lifecycle does not allow.
+     */
     public boolean transition(String id, NodeState from, NodeState to) {
+        NodeLifecycle.requireAllowed(from, to);
         return jdbc.sql("""
                 UPDATE storage_nodes
                    SET state = :to, state_changed_at = now(), updated_at = now(), version = version + 1

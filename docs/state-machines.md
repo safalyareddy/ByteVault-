@@ -72,8 +72,16 @@ stateDiagram-v2
     CORRUPT --> DELETING: cleanup after repair commit
     LOST --> DELETING: cleanup after repair commit
     FAILED_WRITE --> PENDING: chunk PUT retry
+    CORRUPT --> PENDING: in-place repair (corrupt bytes deleted first)
+    LOST --> PENDING: repair targets this node again
+    LOST --> DELETING: rejoined but excess, missing or damaged
+    VERIFIED --> DELETING: superseded copy on a DRAINING node
     DELETING --> DELETED
 ```
+
+Superseded copies (CORRUPT, LOST, or VERIFIED on a DRAINING node) move to
+DELETING only inside the repair-commit transaction, and only once the chunk
+has RF VERIFIED copies on non-draining nodes (`ReplicationStatus.retireSuperseded`).
 
 `UNIQUE(chunk_id, node_id)` means a node holds at most one replica row per
 chunk. A retry reuses that row and never creates a duplicate.
@@ -83,7 +91,7 @@ chunk. A retry reuses that row and never creates a duplicate.
 ```mermaid
 stateDiagram-v2
     [*] --> JOINING: first signed heartbeat
-    JOINING --> HEALTHY: health check passes + data dir writable
+    JOINING --> HEALTHY: N UP heartbeats + authenticated admission probe
     HEALTHY --> SUSPECT: no heartbeat for BV_SUSPECT_AFTER
     SUSPECT --> HEALTHY: heartbeat received
     SUSPECT --> OFFLINE: no heartbeat for BV_OFFLINE_AFTER
@@ -92,6 +100,22 @@ stateDiagram-v2
     SUSPECT --> DRAINING: ADMIN drain (audited)
     DRAINING --> HEALTHY: ADMIN cancel drain (audited)
 ```
+
+Heartbeats drive the transitions ([ADR-0010](adr/0010-push-heartbeats-and-admission.md)):
+
+| From | To | Trigger | Guard |
+|---|---|---|---|
+| (none) | JOINING | first authenticated heartbeat | node is listed in `BV_NODES` and its signature verifies |
+| JOINING | HEALTHY | admission | `BV_ADMISSION_HEARTBEATS` consecutive UP heartbeats, then a signed probe of the configured endpoint returns 404 |
+| HEALTHY | SUSPECT | failure detector | no heartbeat for `BV_SUSPECT_AFTER` |
+| HEALTHY | SUSPECT | heartbeat content | node reports DOWN or an unwritable data directory |
+| SUSPECT | HEALTHY | heartbeat | an UP heartbeat |
+| SUSPECT | OFFLINE | failure detector | no heartbeat for `BV_OFFLINE_AFTER`; in the same transaction its VERIFIED replicas become LOST |
+| OFFLINE | JOINING | heartbeat | the node must be re-admitted |
+
+The allowed-transition table is enforced in code (`NodeLifecycle`) and
+covered by unit tests. Every transition is compare-and-set, and each one
+writes an outbox event and an audit row.
 
 - **SUSPECT:** the node isn't used for new placements, but its replicas are
   *not* marked LOST, because a missed heartbeat is only a suspicion.

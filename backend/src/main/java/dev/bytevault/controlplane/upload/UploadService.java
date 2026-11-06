@@ -5,8 +5,8 @@ import dev.bytevault.controlplane.config.ClusterProperties;
 import dev.bytevault.controlplane.events.Topics;
 import dev.bytevault.controlplane.node.NodeClient;
 import dev.bytevault.controlplane.node.NodeRepository;
-import dev.bytevault.controlplane.node.NodeState;
 import dev.bytevault.controlplane.outbox.OutboxWriter;
+import dev.bytevault.controlplane.placement.PlacementPolicy;
 import dev.bytevault.controlplane.placement.RendezvousPlacement;
 import dev.bytevault.controlplane.upload.UploadDtos.ChunkUploadResult;
 import dev.bytevault.controlplane.upload.UploadDtos.CompleteResult;
@@ -58,8 +58,6 @@ public class UploadService {
     private static final Logger log = LoggerFactory.getLogger(UploadService.class);
     private static final Pattern IDEMPOTENCY_KEY = Pattern.compile("^[A-Za-z0-9._:-]{8,128}$");
     private static final int BUFFER = 64 * 1024;
-    /** Free space a node must keep beyond the chunk itself to be eligible for placement. */
-    private static final long NODE_FREE_SPACE_RESERVE = 256L * 1024 * 1024;
 
     private final JdbcClient jdbc;
     private final JdbcTemplate jdbcTemplate;
@@ -327,21 +325,21 @@ public class UploadService {
             return result(index, sha, chunk.id(), rf); // idempotent retry: nothing to write
         }
 
-        int needed = rf - verified.size();
-        List<String> eligible = nodes.findByState(NodeState.HEALTHY).stream()
-                .filter(n -> !verified.contains(n.id()))
-                .filter(n -> n.usableBytes() >= chunk.byteSize() + NODE_FREE_SPACE_RESERVE)
-                .map(NodeRepository.NodeRow::id)
+        List<PlacementPolicy.Candidate> candidates = nodes.findAll().stream()
+                .map(n -> new PlacementPolicy.Candidate(n.id(), n.state(), n.usableBytes()))
                 .toList();
-        List<String> ranked = RendezvousPlacement.rank(RendezvousPlacement.chunkKey(s.objectId(), index), eligible);
-        if (ranked.size() < needed) {
+        PlacementPolicy.Placement placement = PlacementPolicy.choose(
+                RendezvousPlacement.chunkKey(s.objectId(), index), candidates, rf - verified.size(),
+                chunk.byteSize(), cluster.getNodeFreeSpaceReserveBytes(), verified);
+        if (!placement.satisfied()) {
             failure("insufficient_nodes");
             throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "INSUFFICIENT_HEALTHY_NODES",
-                    "not enough healthy nodes with capacity to place " + needed + " more replica(s)",
+                    "not enough healthy nodes with capacity to place " + placement.needed() + " more replica(s)",
                     Map.of("replicationFactor", rf, "verifiedReplicas", verified.size(),
-                            "eligibleNodes", ranked.size()));
+                            "eligibleNodes", placement.eligible(),
+                            "excludedForCapacity", placement.excludedForCapacity()));
         }
-        List<String> targets = ranked.subList(0, needed);
+        List<String> targets = placement.targets();
 
         tx.executeWithoutResult(t -> {
             int updated = jdbc.sql("""

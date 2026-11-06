@@ -24,6 +24,21 @@ risk long-held locks if a process crashes mid-copy.
 - If the lease expires, another worker can take the job over. Every step is
   idempotent because node PUTs are idempotent by chunk ID and checksum.
 
+## Implementation notes (Phase 5)
+- When no eligible target exists, the job returns to PENDING with
+  `last_error = waiting for capacity…`. That attempt isn't counted, and the
+  job retries every `BV_REPAIR_CAPACITY_WAIT`. Running short of nodes is a
+  cluster condition, not a failure of the job, and it must never lead to
+  ABANDONED or to a lower RF.
+- A corrupt copy on the chosen target is deleted from that node before the
+  rewrite. That's safe because the bytes are known to be bad and a verified
+  source is already in the spool.
+- Object status is recomputed under a `SELECT … FOR UPDATE` on the object row,
+  so concurrent repairs of different chunks see each other's commits.
+- Under contention with `markOffline`, which locks many rows, PostgreSQL may
+  abort one side as a deadlock victim. Both sides are retried: the repair job
+  by its backoff, the detector by its next tick.
+
 ## Consequences
 - A crashed worker delays a repair by at most one lease duration.
 - Repair speed is deliberately capped to keep the laptop responsive.

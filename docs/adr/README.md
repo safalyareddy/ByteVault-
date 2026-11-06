@@ -11,3 +11,4 @@
 | [0007](0007-repair-concurrency.md) | Lease-based repair jobs with bounded concurrency | Accepted |
 | [0008](0008-local-topology.md) | Single-host Compose topology sized for a 16 GB laptop | Accepted |
 | [0009](0009-pinned-versions.md) | Pinned toolchain and dependency versions | Accepted |
+| [0010](0010-push-heartbeats-and-admission.md) | Signed push heartbeats with an admission probe | Accepted |

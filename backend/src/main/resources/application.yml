@@ -44,10 +44,28 @@ spring:
       operation-timeout: 10s
     producer:
       acks: all
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
       properties:
         enable.idempotence: true
+        max.in.flight.requests.per.connection: 5
+        # Fail fast during a broker outage; the outbox keeps the events and retries.
+        max.block.ms: 5000
+        request.timeout.ms: 5000
+        delivery.timeout.ms: 12000
+        linger.ms: 5
+    consumer:
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      max-poll-records: 50
+    listener:
+      ack-mode: record
+      missing-topics-fatal: false
 
 bytevault:
+  admin-token: ${BV_ADMIN_TOKEN:}
   chunk-size-bytes: ${BV_CHUNK_SIZE_BYTES:4194304}
   replication-factor: ${BV_REPLICATION_FACTOR:3}
   max-upload-bytes: ${BV_MAX_UPLOAD_BYTES:1073741824}
@@ -61,6 +79,18 @@ bytevault:
     node-request-timeout: ${BV_NODE_REQUEST_TIMEOUT:30s}
     max-concurrent-chunk-transfers: ${BV_MAX_CONCURRENT_CHUNK_TRANSFERS:8}
     upload-session-ttl: ${BV_UPLOAD_SESSION_TTL:24h}
+    admission-heartbeats: ${BV_ADMISSION_HEARTBEATS:2}
+    node-free-space-reserve-bytes: ${BV_NODE_FREE_SPACE_RESERVE_BYTES:268435456}
+  repair:
+    enabled: ${BV_REPAIR_ENABLED:true}
+    max-concurrent: ${BV_REPAIR_MAX_CONCURRENT:2}
+    lease: ${BV_REPAIR_LEASE:2m}
+    max-attempts: ${BV_REPAIR_MAX_ATTEMPTS:5}
+    capacity-wait: ${BV_REPAIR_CAPACITY_WAIT:30s}
+    scrub:
+      enabled: ${BV_SCRUB_ENABLED:true}
+      batch-size: ${BV_SCRUB_BATCH_SIZE:50}
+      pause-between-chunks: ${BV_SCRUB_PAUSE:20ms}
   kafka:
     topic-partitions: ${BV_KAFKA_TOPIC_PARTITIONS:3}
     topic-replication-factor: ${BV_KAFKA_TOPIC_REPLICATION:1}
