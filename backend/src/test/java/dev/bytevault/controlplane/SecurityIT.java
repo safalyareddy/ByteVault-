@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.util.Map;
 import java.util.UUID;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
@@ -36,6 +37,12 @@ class SecurityIT {
 
     @Autowired TestRestTemplate http;
     @Autowired JdbcTemplate jdbc;
+
+    // Another IT class sharing this cached context may have logged the shared client in as admin.
+    @BeforeEach
+    void noImplicitToken() {
+        TestAuth.anonymous(http);
+    }
 
     String adminToken() {
         return TestAuth.login(http, TestAuth.ADMIN, TestAuth.ADMIN_PASSWORD);

@@ -33,6 +33,11 @@ public final class TestAuth {
         }
     }
 
+    /** Undoes {@link #asAdmin}: the TestRestTemplate is shared by every IT class using the same context. */
+    public static void anonymous(TestRestTemplate http) {
+        http.getRestTemplate().getInterceptors().removeIf(i -> i instanceof BearerInterceptor);
+    }
+
     public static String login(TestRestTemplate http, String username, String password) {
         var res = http.postForEntity("/api/v1/auth/login", Map.of("username", username, "password", password),
                 JsonNode.class);
