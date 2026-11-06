@@ -87,7 +87,9 @@ services:
       BV_SUSPECT_AFTER: ${BV_SUSPECT_AFTER:-15s}
       BV_OFFLINE_AFTER: ${BV_OFFLINE_AFTER:-45s}
       BV_SCRUB_INTERVAL: ${BV_SCRUB_INTERVAL:-10m}
+      BV_NODES: node-1=http://node-1:9100,node-2=http://node-2:9100,node-3=http://node-3:9100
       BV_NODE_SECRETS: node-1:${BV_NODE_1_SECRET:?set in .env},node-2:${BV_NODE_2_SECRET:?set in .env},node-3:${BV_NODE_3_SECRET:?set in .env}
+      BV_MAX_CONCURRENT_CHUNK_TRANSFERS: ${BV_MAX_CONCURRENT_CHUNK_TRANSFERS:-8}
       LOGGING_STRUCTURED_FORMAT_CONSOLE: logstash
     ports:
       - "127.0.0.1:${BV_BACKEND_HOST_PORT:-8090}:8090"

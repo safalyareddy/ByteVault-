@@ -25,8 +25,8 @@ public record NodeProperties(
         @NotNull Duration heartbeatInterval,
         @Min(1) long maxChunkBytes) {
 
-    public static final int PROTOCOL_VERSION = 1;
-    public static final int MIN_SECRET_LENGTH = 32;
+    public static final int PROTOCOL_VERSION = dev.bytevault.protocol.NodeProtocol.VERSION;
+    public static final int MIN_SECRET_LENGTH = dev.bytevault.protocol.RequestSigner.MIN_SECRET_LENGTH;
 
     /**
      * Checked as a derived property, not with {@code @Size} on the field: Spring's startup failure

@@ -25,6 +25,9 @@ stateDiagram-v2
     COMPLETE --> DELETING: DELETE
     DEGRADED --> DELETING: DELETE
     FAILED --> DELETING: cleanup
+    INITIATED --> DELETING: DELETE (abort upload)
+    UPLOADING --> DELETING: DELETE (abort upload)
+    INITIATED --> COMPLETE: complete of a zero-byte object
     DELETING --> DELETED: all replica bytes removed
     DELETED --> [*]
 ```
@@ -39,7 +42,12 @@ stateDiagram-v2
 | COMPLETE | DEGRADED | replica marked LOST/CORRUPT | VERIFIED count < RF for at least one chunk |
 | DEGRADED | COMPLETE | repair committed | VERIFIED count = RF for every chunk |
 | COMPLETE/DEGRADED/FAILED | DELETING | DELETE (idempotent) | owner or ADMIN |
+| INITIATED/UPLOADING | DELETING | DELETE (abort) | owner; the session becomes ABORTED |
+| INITIATED | COMPLETE | complete request | zero chunks (empty object) |
 | DELETING | DELETED | cleanup worker | every replica DELETED on its node |
+
+`VERIFYING` exists only inside the completion transaction. The check and the
+transition to COMPLETE commit together, so `VERIFYING` is never persisted.
 
 Only `COMPLETE` and `DEGRADED` objects can be downloaded. `DEGRADED` needs at
 least one VERIFIED replica per chunk.
